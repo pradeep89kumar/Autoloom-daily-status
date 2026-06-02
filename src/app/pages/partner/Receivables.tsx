@@ -37,8 +37,7 @@ function statusKind(r: ReceivableRow): StatusKind {
 }
 
 function effectivePending(r: ReceivableRow): number {
-  const s = (r.paymentStatus || r.status || "").toLowerCase();
-  if (s.includes("partial") && r.invoiceAmount > 0) {
+  if (r.invoiceAmount > 0) {
     return Math.max(0, r.invoiceAmount - (r.receipts || 0));
   }
   return r.pendingBalance;
@@ -90,9 +89,50 @@ export function PartnerReceivables() {
     });
   }, [rows, filter]);
 
+  const merged = useMemo(() => {
+    // Combine rows that share the same invoice number into one logical invoice.
+    // Sum invoiceAmount + receipts; keep earliest invoiceDate, latest dueDate / receivedOn.
+    const byInv = new Map<string, ReceivableRow>();
+    const passthrough: ReceivableRow[] = [];
+    for (const r of filtered) {
+      const inv = (r.invoiceNumber || "").trim();
+      if (!inv) {
+        passthrough.push(r);
+        continue;
+      }
+      const key = `${(r.party || "").trim()}||${inv}`;
+      const prev = byInv.get(key);
+      if (!prev) {
+        byInv.set(key, { ...r });
+        continue;
+      }
+      prev.invoiceAmount = (prev.invoiceAmount || 0) + (r.invoiceAmount || 0);
+      prev.receipts = (prev.receipts || 0) + (r.receipts || 0);
+      prev.pendingBalance = (prev.pendingBalance || 0) + (r.pendingBalance || 0);
+      const aInv = fromYmd(prev.invoiceDate)?.getTime() ?? Infinity;
+      const bInv = fromYmd(r.invoiceDate)?.getTime() ?? Infinity;
+      if (bInv < aInv && r.invoiceDate) prev.invoiceDate = r.invoiceDate;
+      const aDue = fromYmd(prev.dueDate)?.getTime() ?? -Infinity;
+      const bDue = fromYmd(r.dueDate)?.getTime() ?? -Infinity;
+      if (bDue > aDue && r.dueDate) prev.dueDate = r.dueDate;
+      const aRcv = fromYmd(prev.receivedOn)?.getTime() ?? -Infinity;
+      const bRcv = fromYmd(r.receivedOn)?.getTime() ?? -Infinity;
+      if (bRcv > aRcv && r.receivedOn) prev.receivedOn = r.receivedOn;
+      if (!prev.paymentStatus && r.paymentStatus) prev.paymentStatus = r.paymentStatus;
+      if (!prev.status && r.status) prev.status = r.status;
+      if (prev.orderId && r.orderId && !prev.orderId.includes(r.orderId)) {
+        prev.orderId = `${prev.orderId}, ${r.orderId}`;
+      }
+      if (prev.paaguId && r.paaguId && !prev.paaguId.includes(r.paaguId)) {
+        prev.paaguId = `${prev.paaguId}, ${r.paaguId}`;
+      }
+    }
+    return [...Array.from(byInv.values()), ...passthrough];
+  }, [filtered]);
+
   const grouped = useMemo(() => {
     const map = new Map<string, { party: string; total: number; count: number; rows: ReceivableRow[] }>();
-    for (const r of filtered) {
+    for (const r of merged) {
       const key = (r.party || "").trim();
       if (!key) continue;
       let g = map.get(key);
@@ -161,7 +201,7 @@ export function PartnerReceivables() {
         <p className="text-2xl font-semibold mt-0.5">{fmtRupees(grandTotal)}</p>
         <p className="text-[12px] text-[var(--color-text-secondary)] mt-0.5">
           Across {grouped.length} {grouped.length === 1 ? "party" : "parties"} ·{" "}
-          {filtered.length} {filtered.length === 1 ? "invoice" : "invoices"}
+          {merged.length} {merged.length === 1 ? "invoice" : "invoices"}
         </p>
       </div>
 
