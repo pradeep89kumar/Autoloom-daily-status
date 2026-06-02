@@ -85,7 +85,7 @@ export function dayBrief(date: Date, summary: DaySummary, isInProgress: boolean)
     ? `${dateLabel} (இன்றுவரை)`
     : dateLabel;
 
-  return `${lead} — ${loomWord} ${meters} நெய்தன. வருமானம் ${rupees}, சராசரி திறன் ${eff}%.`;
+  return `${lead} — ${loomWord} ${meters} நெய்தன. வருமானம் ${rupees}, average performance ${eff}%.`;
 }
 
 // Keep numberWord helper around in case other copy reuses it.

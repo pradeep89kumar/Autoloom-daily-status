@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useNavigate } from "react-router";
 import { Wallet, HardHat, Lock, ChevronRight, Download, Share } from "lucide-react";
 import { usePwaInstall } from "../lib/usePwaInstall";
@@ -6,7 +5,6 @@ import { usePwaInstall } from "../lib/usePwaInstall";
 export function RoleSelector() {
   const navigate = useNavigate();
   const install = usePwaInstall();
-  const [showIosHelp, setShowIosHelp] = useState(false);
 
   return (
     <div
@@ -63,19 +61,14 @@ export function RoleSelector() {
       )}
 
       {install.kind === "ios" && (
-        <button
-          onClick={() => setShowIosHelp((v) => !v)}
-          className="mt-8 inline-flex items-center gap-2 px-4 py-2.5 rounded-full border border-[var(--color-border-hairline)] text-[var(--color-text-primary)] text-[14px] font-semibold active:translate-y-px"
-        >
-          <Share className="w-4 h-4" strokeWidth={2} />
-          Add to Home Screen
-        </button>
-      )}
-
-      {showIosHelp && install.kind === "ios" && (
-        <div className="mt-3 max-w-sm text-[13px] text-[var(--color-text-secondary)] text-center leading-relaxed">
-          In Safari, tap the <span className="font-semibold">Share</span> button,
-          then choose <span className="font-semibold">"Add to Home Screen"</span>.
+        <div className="mt-8 w-full max-w-sm rounded-2xl border border-[var(--color-border-hairline)] bg-white px-4 py-3.5">
+          <div className="flex items-center gap-2 text-[14px] font-semibold text-[var(--color-text-primary)]">
+            <Share className="w-4 h-4" strokeWidth={2} />
+            Add to Home Screen
+          </div>
+          <p className="mt-1.5 text-[13px] leading-relaxed text-[var(--color-text-secondary)]">
+            In Safari, tap the <span className="font-semibold text-[var(--color-text-primary)]">Share</span> button at the bottom, then choose <span className="font-semibold text-[var(--color-text-primary)]">"Add to Home Screen"</span>.
+          </p>
         </div>
       )}
 
