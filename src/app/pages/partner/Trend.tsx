@@ -124,14 +124,14 @@ export function PartnerTrend() {
   return (
     <div className="px-4 py-4">
       <div className="mb-4">
-        <h2 className="text-[15px] font-semibold mb-1">Last {DAYS} days</h2>
-        <p className="text-[12px] text-[var(--color-text-secondary)]">
+        <h2 className="text-[18px] font-bold mb-1 text-[var(--color-text-primary)]">Last {DAYS} days</h2>
+        <p className="text-[14px] text-[var(--color-text-secondary)]">
           {shortDateLong(dates[0])} — {shortDateLong(dates[dates.length - 1])}
         </p>
       </div>
 
       {/* Metric toggle */}
-      <div className="grid grid-cols-3 gap-1 p-1 bg-black/[0.04] rounded-lg mb-5 text-[13px]">
+      <div className="grid grid-cols-3 gap-1 p-1 bg-black/[0.04] rounded-lg mb-5 text-[14px]">
         <SegBtn active={metric === "efficiency"} onClick={() => setMetric("efficiency")} label="Efficiency" />
         <SegBtn active={metric === "meters"} onClick={() => setMetric("meters")} label="Metres" />
         <SegBtn active={metric === "revenue"} onClick={() => setMetric("revenue")} label="Revenue" />
@@ -139,7 +139,7 @@ export function PartnerTrend() {
 
       {/* Heatmap */}
       <div className="mb-6">
-        <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-secondary)] mb-2">Daily heatmap</div>
+        <div className="text-[13px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)] mb-2">Daily heatmap</div>
         {loading ? (
           <div className="h-44 bg-black/[0.04] rounded animate-pulse" />
         ) : (
@@ -151,7 +151,7 @@ export function PartnerTrend() {
                   {dates.map((d) => (
                     <th
                       key={ymd(d)}
-                      className="text-[10px] font-normal text-[var(--color-text-secondary)] tabular-nums px-0.5"
+                      className="text-[12px] font-medium text-[var(--color-text-secondary)] tabular-nums px-0.5"
                     >
                       {d.getDate()}
                     </th>
@@ -161,7 +161,7 @@ export function PartnerTrend() {
               <tbody>
                 {LOOMS.map((loom) => (
                   <tr key={loom}>
-                    <td className="text-[11px] font-medium text-[var(--color-text-secondary)] pr-1">{loom}</td>
+                    <td className="text-[13px] font-semibold text-[var(--color-text-primary)] pr-1">{loom}</td>
                     {dates.map((d) => {
                       const cell = grid.get(`${loom}|${ymd(d)}`);
                       const v = metricValue(cell, metric);
@@ -192,7 +192,7 @@ export function PartnerTrend() {
             </table>
           </div>
         )}
-        <div className="flex items-center gap-2 mt-3 text-[10px] text-[var(--color-text-secondary)]">
+        <div className="flex items-center gap-3 mt-3 text-[13px] text-[var(--color-text-secondary)]">
           {metric === "efficiency" ? (
             <>
               <Legend tint="bg-[var(--color-status-red)]/15" label="<50%" />
@@ -211,7 +211,7 @@ export function PartnerTrend() {
 
       {/* Per-loom totals */}
       <div>
-        <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-secondary)] mb-2">Loom totals</div>
+        <div className="text-[13px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)] mb-2">Loom totals</div>
         {loading ? (
           <div className="space-y-2">
             {LOOMS.map((l) => (
@@ -231,11 +231,11 @@ export function PartnerTrend() {
                     : fmtPercent(eff);
               return (
                 <li key={loom} className="py-3 flex items-center gap-3">
-                  <span className="w-10 text-[14px] font-medium">{loom}</span>
-                  <span className="flex-1 text-[12px] text-[var(--color-text-secondary)]">
+                  <span className="w-10 text-[16px] font-bold tabular-nums">{loom}</span>
+                  <span className="flex-1 text-[14px] text-[var(--color-text-secondary)] tabular-nums">
                     {fmtMeters(t?.meters ?? 0)} · {fmtRupees(t?.revenue ?? 0)}
                   </span>
-                  <span className="text-[14px] font-medium tabular-nums">{value}</span>
+                  <span className="text-[18px] font-bold tabular-nums text-[var(--color-text-primary)]">{value}</span>
                 </li>
               );
             })}

@@ -164,8 +164,8 @@ export function PartnerReceivables() {
   return (
     <div className="px-4 pt-4 pb-6">
       <div className="mb-3">
-        <h2 className="text-lg font-semibold">Receivables</h2>
-        <p className="text-sm text-[var(--color-text-secondary)] mt-0.5">
+        <h2 className="text-[18px] font-bold text-[var(--color-text-primary)]">Receivables</h2>
+        <p className="text-[14px] text-[var(--color-text-secondary)] mt-0.5">
           Party-wise pending against raised invoices.
         </p>
       </div>
@@ -183,7 +183,7 @@ export function PartnerReceivables() {
           <button
             key={f.k}
             onClick={() => setFilter(f.k)}
-            className={`px-3 py-1.5 rounded-full text-[13px] whitespace-nowrap border ${
+            className={`px-3 py-1.5 rounded-full text-[14px] font-medium whitespace-nowrap border ${
               filter === f.k
                 ? "bg-[var(--color-text-primary)] text-white border-[var(--color-text-primary)]"
                 : "bg-white text-[var(--color-text-secondary)] border-[var(--color-border-hairline)]"
@@ -195,22 +195,22 @@ export function PartnerReceivables() {
       </div>
 
       <div className="rounded-xl border border-[var(--color-border-hairline)] p-4 mb-4">
-        <p className="text-[12px] text-[var(--color-text-secondary)] uppercase tracking-wide">
+        <p className="text-[13px] font-semibold text-[var(--color-text-secondary)] uppercase tracking-wide">
           Total {filter === "all" ? "" : filter} pending
         </p>
-        <p className="text-2xl font-semibold mt-0.5">{fmtRupees(grandTotal)}</p>
-        <p className="text-[12px] text-[var(--color-text-secondary)] mt-0.5">
+        <p className="text-[22px] font-bold tabular-nums text-[var(--color-text-primary)] mt-0.5">{fmtRupees(grandTotal)}</p>
+        <p className="text-[14px] text-[var(--color-text-secondary)] mt-0.5">
           Across {grouped.length} {grouped.length === 1 ? "party" : "parties"} ·{" "}
           {merged.length} {merged.length === 1 ? "invoice" : "invoices"}
         </p>
       </div>
 
       {loading && (
-        <p className="text-sm text-[var(--color-text-secondary)] italic">Loading…</p>
+        <p className="text-[15px] text-[var(--color-text-secondary)] italic">Loading…</p>
       )}
 
       {!loading && grouped.length === 0 && (
-        <p className="text-sm text-[var(--color-text-secondary)] italic">
+        <p className="text-[15px] text-[var(--color-text-secondary)] italic">
           No matching invoices.
         </p>
       )}
@@ -228,13 +228,13 @@ export function PartnerReceivables() {
                 className="w-full px-4 py-3 flex items-center justify-between text-left"
               >
                 <div className="min-w-0">
-                  <p className="text-[15px] font-medium truncate">{g.party}</p>
-                  <p className="text-[12px] text-[var(--color-text-secondary)] mt-0.5">
+                  <p className="text-[16px] font-semibold text-[var(--color-text-primary)] truncate">{g.party}</p>
+                  <p className="text-[14px] text-[var(--color-text-secondary)] mt-0.5">
                     {g.count} {g.count === 1 ? "invoice" : "invoices"}
                   </p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <span className="text-[15px] font-semibold">{fmtRupees(g.total)}</span>
+                  <span className="text-[18px] font-bold tabular-nums text-[var(--color-text-primary)]">{fmtRupees(g.total)}</span>
                   {isOpen ? (
                     <ChevronUp
                       className="w-4 h-4 text-[var(--color-text-secondary)]"
@@ -260,27 +260,27 @@ export function PartnerReceivables() {
                         className="px-4 py-3"
                       >
                         <div className="flex items-baseline justify-between gap-2">
-                          <p className="text-[14px] font-medium truncate">
+                          <p className="text-[16px] font-semibold text-[var(--color-text-primary)] truncate">
                             {r.invoiceNumber || r.paaguId || r.orderId || "—"}
                           </p>
                           <span
-                            className={`text-[11px] px-2 py-0.5 rounded-full ${badge.cls}`}
+                            className={`text-[13px] font-semibold px-2 py-0.5 rounded-full ${badge.cls}`}
                           >
                             {badge.label}
                           </span>
                         </div>
-                        <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[12px] text-[var(--color-text-secondary)]">
+                        <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[14px] text-[var(--color-text-secondary)]">
                           <span>Inv {fmtDate(r.invoiceDate)}</span>
                           <span>Due {fmtDate(r.dueDate)}</span>
                           <span>Order · {r.orderId || "—"}</span>
                           <span>Paagu · {r.paaguId || "—"}</span>
                         </div>
-                        <div className="mt-1.5 flex items-baseline justify-between gap-2 text-[13px]">
-                          <span className="text-[var(--color-text-secondary)]">
+                        <div className="mt-1.5 flex items-baseline justify-between gap-2">
+                          <span className="text-[14px] text-[var(--color-text-secondary)] tabular-nums">
                             Inv {fmtRupees(r.invoiceAmount)}
                             {r.receipts > 0 && <> · Recd {fmtRupees(r.receipts)}</>}
                           </span>
-                          <span className="font-semibold">
+                          <span className="text-[18px] font-bold tabular-nums text-[var(--color-text-primary)]">
                             {fmtRupees(effectivePending(r))}
                           </span>
                         </div>
