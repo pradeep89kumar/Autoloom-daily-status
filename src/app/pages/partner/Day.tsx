@@ -1,0 +1,324 @@
+import { useEffect, useMemo, useState } from "react";
+import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from "lucide-react";
+import { fetchMasterDay, type MasterRow } from "../../lib/sheetSync";
+import {
+  summarizeDay,
+  perLoomTotals,
+  fmtMeters,
+  fmtRupees,
+  fmtPercent,
+  dayBrief,
+  shortDateLong,
+  efficiencyBand,
+  endStateLabel,
+  type LoomDayTotal,
+} from "../../lib/partnerCopy";
+
+function ymd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dd}`;
+}
+
+function fromYmd(s: string): Date {
+  const [y, m, d] = s.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+function dateLabel(d: Date): string {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(d);
+  target.setHours(0, 0, 0, 0);
+  const diffDays = Math.round((today.getTime() - target.getTime()) / 86400000);
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  return shortDateLong(d);
+}
+
+export function PartnerDay() {
+  // Default to yesterday — the most recent fully closed day.
+  const [date, setDate] = useState<Date>(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    return d;
+  });
+  const [rows, setRows] = useState<MasterRow[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    setExpanded(null);
+    fetchMasterDay(ymd(date)).then((r) => {
+      if (!alive) return;
+      setRows(r);
+      setLoading(false);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [date]);
+
+  const summary = useMemo(() => summarizeDay(rows || []), [rows]);
+  const looms = useMemo(() => perLoomTotals(rows || []), [rows]);
+
+  const isToday = ymd(date) === ymd(new Date());
+  const inProgress = isToday;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const isFuture = date.getTime() > today.getTime();
+
+  function step(days: number) {
+    const next = new Date(date);
+    next.setDate(next.getDate() + days);
+    next.setHours(0, 0, 0, 0);
+    if (next.getTime() > today.getTime()) return;
+    setDate(next);
+  }
+
+  return (
+    <div className="px-4 py-4">
+      {/* Day stepper */}
+      <div className="flex items-center justify-between mb-4">
+        <button
+          onClick={() => step(-1)}
+          className="p-2 -ml-2 text-[var(--color-text-primary)]"
+          aria-label="Previous day"
+        >
+          <ChevronLeft className="w-5 h-5" strokeWidth={1.5} />
+        </button>
+        <div className="flex flex-col items-center">
+          <input
+            type="date"
+            value={ymd(date)}
+            max={ymd(today)}
+            onChange={(e) => {
+              if (e.target.value) setDate(fromYmd(e.target.value));
+            }}
+            className="text-base font-semibold bg-transparent border-0 text-center cursor-pointer"
+            aria-label="Pick date"
+          />
+          <span className="text-xs text-[var(--color-text-secondary)]">{dateLabel(date)}</span>
+        </div>
+        <button
+          onClick={() => step(1)}
+          disabled={isToday || isFuture}
+          className="p-2 -mr-2 text-[var(--color-text-primary)] disabled:opacity-30"
+          aria-label="Next day"
+        >
+          <ChevronRight className="w-5 h-5" strokeWidth={1.5} />
+        </button>
+      </div>
+
+      {/* Header brief */}
+      {loading ? (
+        <SkeletonHeader />
+      ) : (
+        <>
+          <p className="text-[15px] leading-relaxed text-[var(--color-text-primary)] mb-5">
+            {dayBrief(date, summary, inProgress)}
+          </p>
+
+          {summary.shiftsLogged > 0 && (
+            <div className="grid grid-cols-3 gap-3 mb-6 pb-5 border-b border-[var(--color-border-hairline)]">
+              <Stat label="Metres" value={fmtMeters(summary.meters)} />
+              <Stat label="Revenue" value={fmtRupees(summary.revenue)} />
+              <Stat
+                label="Efficiency"
+                value={fmtPercent(summary.weightedEfficiency)}
+                sub={`${summary.loomsReporting} of ${summary.loomsTotal} looms`}
+              />
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Per-loom rows */}
+      {loading ? (
+        <SkeletonRows />
+      ) : looms.length === 0 ? (
+        <EmptyState date={date} inProgress={inProgress} />
+      ) : (
+        <ul className="divide-y divide-[var(--color-border-hairline)]">
+          {looms.map((l) => (
+            <LoomRow
+              key={l.loom}
+              data={l}
+              open={expanded === l.loom}
+              onToggle={() => setExpanded(expanded === l.loom ? null : l.loom)}
+            />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div>
+      <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-secondary)] mb-1">{label}</div>
+      <div className="text-lg font-semibold tabular-nums">{value}</div>
+      {sub && <div className="text-[11px] text-[var(--color-text-secondary)] mt-0.5">{sub}</div>}
+    </div>
+  );
+}
+
+function bandClass(eff: number): string {
+  const b = efficiencyBand(eff);
+  if (b === "high") return "text-[var(--color-status-green)]";
+  if (b === "good") return "text-[var(--color-text-primary)]";
+  if (b === "fair") return "text-[var(--color-status-amber)]";
+  return "text-[var(--color-status-red)]";
+}
+
+function LoomRow({
+  data,
+  open,
+  onToggle,
+}: {
+  data: LoomDayTotal;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const stateLabel = endStateLabel(data.endState);
+
+  // Show order tag(s) on the row itself. If A and B carry different orders,
+  // show both joined by " · "; otherwise show the single tag.
+  const tags = Array.from(
+    new Set(
+      data.rows
+        .map((r) => r.orderTag.trim())
+        .filter((t) => t.length > 0),
+    ),
+  );
+  const orderLine = tags.join(" · ");
+
+  return (
+    <li>
+      <button
+        onClick={onToggle}
+        className="w-full py-4 flex items-center gap-3 text-left"
+      >
+        <div className="w-10 shrink-0">
+          <div className="text-base font-semibold">{data.loom}</div>
+        </div>
+        <div className="flex-1 min-w-0">
+          {orderLine && (
+            <div className="text-[13px] text-[var(--color-text-primary)] font-medium truncate mb-0.5">
+              {orderLine}
+            </div>
+          )}
+          <div className="flex items-baseline gap-2">
+            <span className="text-[15px] font-medium tabular-nums">{fmtMeters(data.meters)}</span>
+            <span className="text-[13px] text-[var(--color-text-secondary)] tabular-nums">{fmtRupees(data.revenue)}</span>
+          </div>
+          {stateLabel && (
+            <div className="text-[12px] text-[var(--color-text-secondary)] mt-0.5">{stateLabel}</div>
+          )}
+        </div>
+        <div className={`text-[15px] font-medium tabular-nums ${bandClass(data.weightedEfficiency)}`}>
+          {fmtPercent(data.weightedEfficiency)}
+        </div>
+        <div className="text-[var(--color-text-secondary)]">
+          {open ? <ChevronUp className="w-4 h-4" strokeWidth={1.5} /> : <ChevronDown className="w-4 h-4" strokeWidth={1.5} />}
+        </div>
+      </button>
+
+      {open && <ShiftDrawer rows={data.rows} />}
+    </li>
+  );
+}
+
+function ShiftDrawer({ rows }: { rows: MasterRow[] }) {
+  const a = rows.find((r) => r.shift === "A");
+  const b = rows.find((r) => r.shift === "B");
+  return (
+    <div className="pb-4 -mt-1 grid grid-cols-2 gap-3">
+      <ShiftCard letter="A" row={a} />
+      <ShiftCard letter="B" row={b} />
+    </div>
+  );
+}
+
+function ShiftCard({ letter, row }: { letter: "A" | "B"; row: MasterRow | undefined }) {
+  if (!row) {
+    return (
+      <div className="rounded-lg border border-[var(--color-border-hairline)] p-3">
+        <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-secondary)]">Shift {letter}</div>
+        <div className="text-[13px] text-[var(--color-text-secondary)] mt-2">Not yet logged.</div>
+      </div>
+    );
+  }
+  const stateLabel = endStateLabel(row.state);
+  return (
+    <div className="rounded-lg border border-[var(--color-border-hairline)] p-3">
+      <div className="flex items-baseline justify-between mb-2">
+        <span className="text-[11px] uppercase tracking-wide text-[var(--color-text-secondary)]">Shift {letter}</span>
+        <span className={`text-[12px] font-medium tabular-nums ${bandClass(row.efficiency)}`}>
+          {fmtPercent(row.efficiency)}
+        </span>
+      </div>
+      <div className="text-[13px] text-[var(--color-text-primary)] mb-1 truncate">{row.weaver || "—"}</div>
+      <div className="text-[12px] text-[var(--color-text-secondary)] mb-2 truncate">{row.orderTag || "—"}</div>
+      <dl className="space-y-1 text-[12px]">
+        <Item k="Metres" v={fmtMeters(row.meters)} />
+        <Item k="Revenue" v={fmtRupees(row.revenue)} />
+        <Item k="RPM" v={row.rpm ? row.rpm.toFixed(0) : "—"} />
+        <Item k="Achieved pick" v={row.achievedPick ? row.achievedPick.toFixed(0) : "—"} />
+        {stateLabel && <Item k="End state" v={stateLabel} />}
+      </dl>
+    </div>
+  );
+}
+
+function Item({ k, v }: { k: string; v: string }) {
+  return (
+    <div className="flex justify-between gap-2">
+      <dt className="text-[var(--color-text-secondary)]">{k}</dt>
+      <dd className="tabular-nums text-[var(--color-text-primary)]">{v}</dd>
+    </div>
+  );
+}
+
+function EmptyState({ date, inProgress }: { date: Date; inProgress: boolean }) {
+  return (
+    <div className="py-10 text-center">
+      <p className="text-[14px] text-[var(--color-text-secondary)]">
+        {inProgress
+          ? "No shift entries logged yet for today."
+          : `No production was logged on ${shortDateLong(date)}.`}
+      </p>
+    </div>
+  );
+}
+
+function SkeletonHeader() {
+  return (
+    <div className="animate-pulse">
+      <div className="h-4 bg-black/5 rounded w-3/4 mb-2" />
+      <div className="h-4 bg-black/5 rounded w-1/2 mb-6" />
+      <div className="grid grid-cols-3 gap-3 mb-6 pb-5 border-b border-[var(--color-border-hairline)]">
+        <div className="h-12 bg-black/5 rounded" />
+        <div className="h-12 bg-black/5 rounded" />
+        <div className="h-12 bg-black/5 rounded" />
+      </div>
+    </div>
+  );
+}
+
+function SkeletonRows() {
+  return (
+    <div className="animate-pulse divide-y divide-[var(--color-border-hairline)]">
+      {[0, 1, 2, 3, 4].map((i) => (
+        <div key={i} className="py-4 h-12 flex items-center">
+          <div className="h-4 w-full bg-black/5 rounded" />
+        </div>
+      ))}
+    </div>
+  );
+}
