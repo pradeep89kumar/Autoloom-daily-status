@@ -10,6 +10,7 @@ import {
   fetchLoadings,
   submitLoadingToSheet,
   type FullRow,
+  type OrderOption,
 } from "../../lib/sheetSync";
 import {
   loadingStatusForTarget,
@@ -26,14 +27,14 @@ export function NewLoading() {
   const returnTo = params.get("return") || "";
 
   const [selected, setSelected] = useState<string>(presetLoom);
-  const [order, setOrder] = useState("");
+  const [order, setOrder] = useState<OrderOption | null>(null);
   const [orderQuery, setOrderQuery] = useState("");
   const [orderOpen, setOrderOpen] = useState(false);
   const [touched, setTouched] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [showAllLooms, setShowAllLooms] = useState(false);
 
-  const [orders, setOrders] = useState<string[]>([]);
+  const [orders, setOrders] = useState<OrderOption[]>([]);
   const [rows, setRows] = useState<FullRow[]>([]);
   const [loadings, setLoadings] = useState<LoadingEvent[]>([]);
 
@@ -77,7 +78,11 @@ export function NewLoading() {
   const orderMatches = useMemo(() => {
     const q = orderQuery.trim().toLowerCase();
     if (!q) return orders;
-    return orders.filter((o) => o.toLowerCase().includes(q));
+    return orders.filter(
+      (o) =>
+        o.design.toLowerCase().includes(q) ||
+        o.customer.toLowerCase().includes(q),
+    );
   }, [orders, orderQuery]);
 
   const errors: Record<string, string> = {};
@@ -101,8 +106,8 @@ export function NewLoading() {
     submitLoadingToSheet({
       kind: "loading",
       loomId: selected.toUpperCase(),
-      designName: order,
-      customerName: "",
+      designName: order!.design,
+      customerName: order!.customer,
       shift: cs.shift,
       shiftDate: ymd(cs.date),
       capturedAt: now.toISOString(),
@@ -111,8 +116,8 @@ export function NewLoading() {
     });
     recordLoading({
       loomId: selected.toUpperCase(),
-      designName: order,
-      customerName: "",
+      designName: order!.design,
+      customerName: order!.customer,
       shift: cs.shift,
       shiftDate: ymd(cs.date),
       capturedAt: now.toISOString(),
@@ -208,7 +213,7 @@ export function NewLoading() {
           </div>
         )}
 
-        <Field label="Order (customer · design)" error={touched ? errors.order : undefined}>
+        <Field label="Design" error={touched ? errors.order : undefined}>
           <div className="relative">
             <button
               type="button"
@@ -219,7 +224,7 @@ export function NewLoading() {
               }`}
             >
               <span className={order ? "" : "text-[var(--color-text-secondary)]"}>
-                {order || "Select order"}
+                {order ? order.design : "Select design"}
               </span>
               <ChevronDown className="w-4 h-4 text-[var(--color-text-secondary)]" strokeWidth={1.5} />
             </button>
@@ -233,35 +238,50 @@ export function NewLoading() {
                     autoFocus
                     value={orderQuery}
                     onChange={(e) => setOrderQuery(e.target.value)}
-                    placeholder="Search…"
+                    placeholder="Search design or customer…"
                     className="input"
                   />
                 </div>
                 <ul className="max-h-56 overflow-auto">
                   {orderMatches.length === 0 && (
                     <li className="px-3 py-2.5 text-[13px] text-[var(--color-text-secondary)] italic">
-                      No matches. Add the order in Sheet3 column B first.
+                      No matches. Add the order in Sheet3 (B = design, C = customer) first.
                     </li>
                   )}
-                  {orderMatches.map((o) => (
-                    <li key={o}>
-                      <button
-                        type="button"
-                        onClick={() => { setOrder(o); setOrderQuery(""); setOrderOpen(false); }}
-                        className="w-full text-left px-3 py-2.5 text-[15px] hover:bg-gray-50 flex items-center justify-between"
-                      >
-                        <span>{o}</span>
-                        {order === o && <Check className="w-4 h-4" strokeWidth={1.5} />}
-                      </button>
-                    </li>
-                  ))}
+                  {orderMatches.map((o, idx) => {
+                    const key = `${o.design}||${o.customer}||${idx}`;
+                    const isSel =
+                      order && order.design === o.design && order.customer === o.customer;
+                    return (
+                      <li key={key}>
+                        <button
+                          type="button"
+                          onClick={() => { setOrder(o); setOrderQuery(""); setOrderOpen(false); }}
+                          className="w-full text-left px-3 py-2.5 hover:bg-gray-50 flex items-center justify-between"
+                        >
+                          <span className="flex flex-col">
+                            <span className="text-[15px]">{o.design}</span>
+                            {o.customer && (
+                              <span className="text-[12px] text-[var(--color-text-secondary)]">{o.customer}</span>
+                            )}
+                          </span>
+                          {isSel && <Check className="w-4 h-4" strokeWidth={1.5} />}
+                        </button>
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
             )}
           </div>
+          {order && order.customer && (
+            <p className="text-[12px] text-[var(--color-text-secondary)] mt-1.5">
+              Customer · <span className="text-[var(--color-text-primary)] font-medium">{order.customer}</span>
+            </p>
+          )}
           {orders.length === 0 && (
             <p className="text-[11px] text-[var(--color-text-secondary)] mt-1">
-              Order list is empty. Populate Sheet3 column B in the Google Sheet.
+              Order list is empty. Populate Sheet3 (B = design, C = customer) in the Google Sheet.
             </p>
           )}
         </Field>

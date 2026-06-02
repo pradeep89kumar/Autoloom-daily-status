@@ -22,7 +22,8 @@ var SHEET_ID = "PASTE_YOUR_SHEET_ID_HERE";
 var SHEET_NAME = "Sheet1";
 var LOADINGS_SHEET = "Loadings";
 var ORDERS_SHEET = "Sheet3";
-var ORDERS_COLUMN = 2; // column B
+var ORDERS_DESIGN_COL = 2;   // column B — design (combined "Sarvesh 16/1")
+var ORDERS_CUSTOMER_COL = 3; // column C — party / customer name
 
 // Partner read-only master workbook (separate spreadsheet).
 var MASTER_SHEET_ID = "1WbsCT_pgF9tk5XgIWQSabH7D_ZWt7bqHks_-c7BcQBo";
@@ -61,18 +62,23 @@ function _readOrders() {
   if (!sh) return [];
   var last = sh.getLastRow();
   if (last < 2) return [];
-  var values = sh.getRange(2, ORDERS_COLUMN, last - 1, 1).getValues();
+  var width = Math.max(ORDERS_DESIGN_COL, ORDERS_CUSTOMER_COL);
+  var values = sh.getRange(2, 1, last - 1, width).getValues();
   var seen = {};
   var out = [];
   for (var i = 0; i < values.length; i++) {
-    var v = String(values[i][0] || "").trim();
-    if (!v) continue;
-    var k = v.toLowerCase();
+    var design = String(values[i][ORDERS_DESIGN_COL - 1] || "").trim();
+    if (!design) continue;
+    var customer = String(values[i][ORDERS_CUSTOMER_COL - 1] || "").trim();
+    var k = design.toLowerCase() + "||" + customer.toLowerCase();
     if (seen[k]) continue;
     seen[k] = true;
-    out.push(v);
+    out.push({ design: design, customer: customer });
   }
-  out.sort(function (a, b) { return a.toLowerCase() < b.toLowerCase() ? -1 : a.toLowerCase() > b.toLowerCase() ? 1 : 0; });
+  out.sort(function (a, b) {
+    var ad = a.design.toLowerCase(), bd = b.design.toLowerCase();
+    return ad < bd ? -1 : ad > bd ? 1 : 0;
+  });
   return out;
 }
 

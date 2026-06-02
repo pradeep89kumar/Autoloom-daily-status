@@ -148,8 +148,13 @@ export async function fetchLoadings(): Promise<RemoteLoading[]> {
   }
 }
 
+export interface OrderOption {
+  design: string;   // combined string from Sheet3 col B (e.g. "Sarvesh 16/1")
+  customer: string; // party name from Sheet3 col C (e.g. "Sarvesh")
+}
+
 export interface Catalog {
-  orders: string[];
+  orders: OrderOption[];
 }
 
 export async function fetchCatalog(): Promise<Catalog> {
@@ -158,9 +163,25 @@ export async function fetchCatalog(): Promise<Catalog> {
     const res = await fetch(`${ENDPOINT}?mode=catalog`, { method: "GET" });
     const data = await res.json();
     if (!data?.ok) return { orders: [] };
-    return {
-      orders: Array.isArray(data.orders) ? data.orders.filter(Boolean) : [],
-    };
+    const raw: unknown = data.orders;
+    if (!Array.isArray(raw)) return { orders: [] };
+    const orders: OrderOption[] = raw
+      .map((o): OrderOption | null => {
+        if (typeof o === "string") {
+          // Backwards-compat: if Apps Script hasn't been redeployed yet,
+          // it may still return strings. Treat the whole string as design,
+          // empty customer.
+          return o.trim() ? { design: o.trim(), customer: "" } : null;
+        }
+        if (o && typeof o === "object") {
+          const design = String((o as { design?: unknown }).design || "").trim();
+          const customer = String((o as { customer?: unknown }).customer || "").trim();
+          return design ? { design, customer } : null;
+        }
+        return null;
+      })
+      .filter((x): x is OrderOption => x !== null);
+    return { orders };
   } catch (e) {
     console.warn("[sheetSync] fetchCatalog failed", e);
     return { orders: [] };

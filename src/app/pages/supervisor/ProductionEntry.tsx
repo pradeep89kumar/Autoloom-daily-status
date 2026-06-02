@@ -314,9 +314,14 @@ export function ProductionEntry() {
         <div className="flex items-baseline gap-2 flex-wrap">
           <h2 className="text-lg font-semibold">{loom.name}</h2>
           <span className="text-sm text-[var(--color-text-secondary)] truncate">
-            {effectiveDesign || effectiveCustomer || <span className="italic">(not loaded)</span>}
+            {effectiveDesign || <span className="italic">(not loaded)</span>}
           </span>
         </div>
+        {effectiveCustomer && (
+          <div className="mt-0.5 text-[12px] text-[var(--color-text-secondary)]">
+            Customer · <span className="text-[var(--color-text-primary)] font-medium">{effectiveCustomer}</span>
+          </div>
+        )}
         {needsLoading && (
           <div className="mt-3 p-3 rounded-lg border border-[var(--color-status-red)] bg-[color-mix(in_srgb,var(--color-status-red)_6%,white)]">
             <div className="flex items-start gap-2">
