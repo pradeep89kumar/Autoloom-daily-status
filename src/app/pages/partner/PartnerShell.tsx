@@ -11,7 +11,7 @@ export function PartnerShell() {
   }
 
   return (
-    <div className="min-h-screen bg-white flex flex-col max-w-md mx-auto relative border-x border-[var(--color-border-hairline)]">
+    <div className="h-[100dvh] bg-white flex flex-col max-w-md mx-auto border-x border-[var(--color-border-hairline)]">
       <header className="h-14 bg-white border-b border-[var(--color-border-hairline)] flex items-center px-4 shrink-0">
         <button
           onClick={exit}
@@ -23,11 +23,11 @@ export function PartnerShell() {
         <h1 className="text-base font-semibold">Partner</h1>
       </header>
 
-      <main className="flex-1 overflow-y-auto overflow-x-hidden pb-20">
+      <main className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
         <Outlet />
       </main>
 
-      <nav className="absolute bottom-0 inset-x-0 h-16 bg-white border-t border-[var(--color-border-hairline)] grid grid-cols-3">
+      <nav className="h-16 bg-white border-t border-[var(--color-border-hairline)] grid grid-cols-3 shrink-0">
         <TabLink to="/partner/day" label="Day" Icon={Calendar} />
         <TabLink to="/partner/trend" label="Trend" Icon={TrendingUp} />
         <TabLink to="/partner/receivables" label="Receivables" Icon={Wallet} />
