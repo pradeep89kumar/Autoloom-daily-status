@@ -378,7 +378,7 @@ export function ProductionEntry() {
           </div>
         </Field>
 
-        <Field label="நெசவாளர்" error={touched ? errors.weaver : undefined}>
+        <Field label="Weaver" error={touched ? errors.weaver : undefined}>
           <div className="relative">
             <button
               type="button"
