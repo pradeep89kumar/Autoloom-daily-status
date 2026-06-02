@@ -25,10 +25,19 @@ export function LoomFloor() {
   const [rows, setRows] = useState<CapturedRow[] | null>(null);
   const [fullRows, setFullRows] = useState<FullRow[]>([]);
   const [loadings, setLoadings] = useState<LoadingEvent[]>([]);
+  const [loading, setLoading] = useState(true);
   const refetch = () => {
-    fetchRecentRows().then((r) => setRows(r));
-    fetchFullRows().then((r) => setFullRows(r));
-    fetchLoadings().then((r) => setLoadings(mergeLoadings(r)));
+    setLoading(true);
+    const startedAt = Date.now();
+    Promise.all([fetchRecentRows(), fetchFullRows(), fetchLoadings()]).then(
+      ([r, f, l]) => {
+        setRows(r);
+        setFullRows(f);
+        setLoadings(mergeLoadings(l));
+        const wait = Math.max(0, 3000 - (Date.now() - startedAt));
+        setTimeout(() => setLoading(false), wait);
+      },
+    );
   };
   useEffect(() => {
     refetch();
@@ -161,6 +170,10 @@ export function LoomFloor() {
         </button>
       </div>
 
+      {loading && <LoomFloorSkeleton />}
+
+      {!loading && (
+        <>
       {/* Progress strip — reflects the default target shift */}
       {target && (
         <div className="px-4 pt-3 pb-3 border-b border-[var(--color-border-hairline)]">
@@ -308,6 +321,33 @@ export function LoomFloor() {
           ))}
         </div>
       )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function LoomFloorSkeleton() {
+  return (
+    <div className="px-4 pt-3">
+      <div className="mb-4">
+        <div className="flex items-center justify-between mb-2">
+          <div className="h-3 w-16 rounded bg-black/[0.06] animate-pulse" />
+          <div className="h-3 w-24 rounded bg-black/[0.04] animate-pulse" />
+        </div>
+        <div className="flex gap-1">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <span key={i} className="flex-1 h-1.5 rounded-full bg-black/[0.06] animate-pulse" />
+          ))}
+        </div>
+      </div>
+      <div className="h-5 w-44 rounded bg-black/[0.06] animate-pulse mb-2" />
+      <div className="h-3 w-32 rounded bg-black/[0.04] animate-pulse mb-4" />
+      <div className="grid grid-cols-4 gap-2">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} className="h-16 rounded-xl bg-black/[0.05] animate-pulse" />
+        ))}
+      </div>
     </div>
   );
 }

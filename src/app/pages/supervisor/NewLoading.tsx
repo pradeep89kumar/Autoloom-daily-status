@@ -40,15 +40,22 @@ export function NewLoading() {
   const [orders, setOrders] = useState<OrderOption[]>([]);
   const [rows, setRows] = useState<FullRow[]>([]);
   const [loadings, setLoadings] = useState<LoadingEvent[]>([]);
+  const [bootstrapping, setBootstrapping] = useState(true);
 
   useEffect(() => {
     let alive = true;
+    const startedAt = Date.now();
     Promise.all([fetchCatalog(), fetchFullRows(), fetchLoadings()]).then(
       ([cat, fr, ld]) => {
         if (!alive) return;
         setOrders(cat.orders);
         setRows(fr);
         setLoadings(mergeLoadings(ld));
+        const wait = Math.max(0, 3000 - (Date.now() - startedAt));
+        setTimeout(() => {
+          if (!alive) return;
+          setBootstrapping(false);
+        }, wait);
       },
     );
     return () => {
@@ -174,6 +181,18 @@ export function NewLoading() {
 
   return (
     <div className="pb-28">
+      {bootstrapping ? (
+        <div className="px-4 pt-4">
+          <div className="h-6 w-40 rounded bg-black/[0.06] animate-pulse mb-2" />
+          <div className="h-3 w-64 rounded bg-black/[0.04] animate-pulse mb-6" />
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="mb-4">
+              <div className="h-3 w-24 rounded bg-black/[0.05] animate-pulse mb-2" />
+              <div className="h-10 w-full rounded-lg bg-black/[0.04] animate-pulse" />
+            </div>
+          ))}
+        </div>
+      ) : (<>
       <div className="px-4 pt-4 pb-3 border-b border-[var(--color-border-hairline)]">
         {isRunoutResume && (
           <div className="mb-2 inline-flex items-center px-2 py-0.5 rounded-full bg-[var(--color-status-amber)] text-white text-[11px] tracking-wide uppercase">
@@ -393,6 +412,7 @@ export function NewLoading() {
         .input:focus { outline: none; border-color: var(--color-text-primary); box-shadow: 0 0 0 3px rgba(17,17,17,0.06); }
         .input-error { border-color: var(--color-status-red); }
       `}</style>
+      </>)}
     </div>
   );
 }

@@ -23,7 +23,15 @@ export function PendingList() {
 
   useEffect(() => {
     let cancelled = false;
-    fetchRecentRows().then((r) => { if (!cancelled) setRows(r); });
+    const startedAt = Date.now();
+    fetchRecentRows().then((r) => {
+      if (cancelled) return;
+      const wait = Math.max(0, 3000 - (Date.now() - startedAt));
+      setTimeout(() => {
+        if (cancelled) return;
+        setRows(r);
+      }, wait);
+    });
     return () => { cancelled = true; };
   }, []);
 
@@ -39,7 +47,16 @@ export function PendingList() {
   const grouped = useMemo(() => groupAllLooms(slots, rows ?? []), [slots, rows]);
 
   if (rows === null) {
-    return <div className="px-4 py-8 text-sm text-[var(--color-text-secondary)]">Loading…</div>;
+    return (
+      <div className="px-4 pt-4 pb-6">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="mb-3 rounded-xl border border-[var(--color-border-hairline)] p-3">
+            <div className="h-4 w-40 rounded bg-black/[0.06] animate-pulse mb-2" />
+            <div className="h-3 w-56 rounded bg-black/[0.04] animate-pulse" />
+          </div>
+        ))}
+      </div>
+    );
   }
 
   if (slots.length === 0) {

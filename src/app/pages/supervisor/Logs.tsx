@@ -17,6 +17,7 @@ export function Logs() {
 
   useEffect(() => {
     let cancelled = false;
+    const startedAt = Date.now();
     fetchFullRows().then((r) => {
       if (cancelled) return;
       const sorted = [...r].sort((a, b) =>
@@ -24,7 +25,11 @@ export function Logs() {
           ? (a.shift === b.shift ? a.loomId.localeCompare(b.loomId) : a.shift < b.shift ? 1 : -1)
           : a.date < b.date ? 1 : -1,
       );
-      setRows(sorted);
+      const wait = Math.max(0, 3000 - (Date.now() - startedAt));
+      setTimeout(() => {
+        if (cancelled) return;
+        setRows(sorted);
+      }, wait);
     });
     return () => { cancelled = true; };
   }, []);
@@ -44,7 +49,21 @@ export function Logs() {
   const grouped = useMemo(() => groupByDateShift(visible), [visible]);
 
   if (rows === null) {
-    return <div className="px-4 py-8 text-sm text-[var(--color-text-secondary)]">Loading…</div>;
+    return (
+      <div className="px-4 pt-4 pb-6">
+        <div className="flex gap-2 mb-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="h-8 w-16 rounded-full bg-black/[0.05] animate-pulse" />
+          ))}
+        </div>
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="mb-3 rounded-xl border border-[var(--color-border-hairline)] p-3">
+            <div className="h-4 w-32 rounded bg-black/[0.06] animate-pulse mb-2" />
+            <div className="h-3 w-48 rounded bg-black/[0.04] animate-pulse" />
+          </div>
+        ))}
+      </div>
+    );
   }
 
   return (

@@ -89,28 +89,37 @@ export function ProductionEntry() {
   // Also keeps `allRows` for day-stepper and `loadings` for design/customer resolution.
   const [allRows, setAllRows] = useState<FullRow[]>([]);
   const [loadings, setLoadings] = useState<LoadingEvent[]>([]);
+  const [bootstrapping, setBootstrapping] = useState(true);
   useEffect(() => {
     let cancelled = false;
+    const startedAt = Date.now();
     Promise.all([fetchFullRows(), fetchLoadings()]).then(([rows, remoteLoadings]) => {
       if (cancelled) return;
       setAllRows(rows);
       setLoadings(mergeLoadings(remoteLoadings));
-      if (!isEdit || !rowIndex) return;
-      const r = rows.find((x) => x.rowIndex === rowIndex);
-      setEditRow(r ?? null);
-      setEditLoading(false);
-      if (!r) return;
-      setWeaver(r.weaver || "");
-      setPickCounter(String(Math.round(r.pickCounter / 1000)));
-      setMeters(String(r.meters));
-      setWeftCuts(String(r.weftCuts));
-      setWarpCuts(String(r.warpCuts));
-      setEfficiency(r.efficiencyPct ? String(r.efficiencyPct) : "");
-      setRuntime(r.runtimeMinutes ? String(r.runtimeMinutes) : "");
-      const { tags: parsedTags, rest } = parseTagsFromNote(r.note || "");
-      setTags(parsedTags);
-      setNote(rest);
-      if (r.loomState) setState(r.loomState as LoomState);
+      if (isEdit && rowIndex) {
+        const r = rows.find((x) => x.rowIndex === rowIndex);
+        setEditRow(r ?? null);
+        setEditLoading(false);
+        if (r) {
+          setWeaver(r.weaver || "");
+          setPickCounter(String(Math.round(r.pickCounter / 1000)));
+          setMeters(String(r.meters));
+          setWeftCuts(String(r.weftCuts));
+          setWarpCuts(String(r.warpCuts));
+          setEfficiency(r.efficiencyPct ? String(r.efficiencyPct) : "");
+          setRuntime(r.runtimeMinutes ? String(r.runtimeMinutes) : "");
+          const { tags: parsedTags, rest } = parseTagsFromNote(r.note || "");
+          setTags(parsedTags);
+          setNote(rest);
+          if (r.loomState) setState(r.loomState as LoomState);
+        }
+      }
+      const wait = Math.max(0, 3000 - (Date.now() - startedAt));
+      setTimeout(() => {
+        if (cancelled) return;
+        setBootstrapping(false);
+      }, wait);
     });
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -294,6 +303,19 @@ export function ProductionEntry() {
 
   return (
     <div className="pb-32">
+      {bootstrapping && (
+        <div className="px-4 pt-4">
+          <div className="h-6 w-32 rounded bg-black/[0.06] animate-pulse mb-2" />
+          <div className="h-3 w-44 rounded bg-black/[0.04] animate-pulse mb-6" />
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="mb-4">
+              <div className="h-3 w-24 rounded bg-black/[0.05] animate-pulse mb-2" />
+              <div className="h-10 w-full rounded-lg bg-black/[0.04] animate-pulse" />
+            </div>
+          ))}
+        </div>
+      )}
+      {!bootstrapping && (<>
       <div className="px-4 pt-4 pb-3 border-b border-[var(--color-border-hairline)]">
         {isEdit && (
           <div className="mb-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[var(--color-brand-primary)] text-white text-[11px] tracking-wide uppercase">
@@ -654,6 +676,7 @@ export function ProductionEntry() {
         .input-error { border-color: var(--color-status-red); }
         .input-error:focus { box-shadow: 0 0 0 3px rgba(200,49,43,0.12); }
       `}</style>
+      </>)}
     </div>
   );
 }
