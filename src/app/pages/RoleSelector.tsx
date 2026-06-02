@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router";
-import { Wallet, HardHat, Lock, ChevronRight, Download, Share } from "lucide-react";
+import { Wallet, HardHat, Lock, ChevronRight, Download, Share, MoreVertical } from "lucide-react";
 import { usePwaInstall } from "../lib/usePwaInstall";
 
 export function RoleSelector() {
@@ -68,6 +68,18 @@ export function RoleSelector() {
           </div>
           <p className="mt-1.5 text-[13px] leading-relaxed text-[var(--color-text-secondary)]">
             In Safari, tap the <span className="font-semibold text-[var(--color-text-primary)]">Share</span> button at the bottom, then choose <span className="font-semibold text-[var(--color-text-primary)]">"Add to Home Screen"</span>.
+          </p>
+        </div>
+      )}
+
+      {install.kind === "android" && (
+        <div className="mt-8 w-full max-w-sm rounded-2xl border border-[var(--color-border-hairline)] bg-white px-4 py-3.5">
+          <div className="flex items-center gap-2 text-[14px] font-semibold text-[var(--color-text-primary)]">
+            <MoreVertical className="w-4 h-4" strokeWidth={2} />
+            Install on Home Screen
+          </div>
+          <p className="mt-1.5 text-[13px] leading-relaxed text-[var(--color-text-secondary)]">
+            In Chrome, tap the <span className="font-semibold text-[var(--color-text-primary)]">⋮ menu</span> at the top right, then choose <span className="font-semibold text-[var(--color-text-primary)]">"Install app"</span> or <span className="font-semibold text-[var(--color-text-primary)]">"Add to Home screen"</span>.
           </p>
         </div>
       )}

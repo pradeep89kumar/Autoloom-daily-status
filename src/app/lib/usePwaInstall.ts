@@ -10,13 +10,13 @@ export type InstallState =
   | { kind: "installed" }
   | { kind: "available"; prompt: () => Promise<void> }
   | { kind: "ios" }
-  | { kind: "unavailable" };
+  | { kind: "android" }
+  | { kind: "desktop" };
 
 function isStandalone(): boolean {
   if (typeof window === "undefined") return false;
   return (
     window.matchMedia?.("(display-mode: standalone)").matches ||
-    // iOS Safari
     (window.navigator as unknown as { standalone?: boolean }).standalone === true
   );
 }
@@ -27,11 +27,17 @@ function isIos(): boolean {
   return /iPad|iPhone|iPod/.test(ua) && !(window as unknown as { MSStream?: unknown }).MSStream;
 }
 
+function isAndroid(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /Android/i.test(navigator.userAgent || "");
+}
+
 export function usePwaInstall(): InstallState {
   const [state, setState] = useState<InstallState>(() => {
     if (isStandalone()) return { kind: "installed" };
     if (isIos()) return { kind: "ios" };
-    return { kind: "unavailable" };
+    if (isAndroid()) return { kind: "android" };
+    return { kind: "desktop" };
   });
 
   useEffect(() => {
