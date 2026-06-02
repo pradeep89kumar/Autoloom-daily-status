@@ -417,6 +417,8 @@ function _readMasterRange(fromYmd, toYmd) {
       loom: all[i].loom,
       shift: all[i].shift,
       meters: all[i].meters,
+      targetMeters: all[i].targetMeters,
+      ratePerMeter: all[i].ratePerMeter,
       revenue: all[i].revenue,
       efficiency: all[i].efficiency,
       state: all[i].state

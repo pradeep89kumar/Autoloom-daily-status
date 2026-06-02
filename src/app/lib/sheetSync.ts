@@ -251,6 +251,8 @@ export interface MasterRangeRow {
   loom: string;
   shift: "A" | "B";
   meters: number;
+  targetMeters: number;
+  ratePerMeter: number;
   revenue: number;
   efficiency: number;
   state: string;

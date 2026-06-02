@@ -1,6 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchMasterRange, type MasterRangeRow } from "../../lib/sheetSync";
-import { fmtMeters, fmtPercent, fmtRupees, shortDateLong } from "../../lib/partnerCopy";
+import {
+  fmtMeters,
+  fmtPercent,
+  fmtRupees,
+  shortDateLong,
+  planSummary,
+  planSummaryForLoom,
+  weekDeltas,
+  opportunityGap,
+  bestAndWatch,
+  disruptionCounts,
+  fmtSignedPct,
+  fmtSignedPp,
+} from "../../lib/partnerCopy";
 
 type Metric = "efficiency" | "meters" | "revenue";
 
@@ -126,6 +139,17 @@ export function PartnerTrend() {
     return out;
   }, [rows]);
 
+  const plan = useMemo(() => planSummary(rows || []), [rows]);
+  const planByLoom = useMemo(() => {
+    const m = new Map<string, ReturnType<typeof planSummaryForLoom>>();
+    for (const loom of LOOMS) m.set(loom, planSummaryForLoom(rows || [], loom));
+    return m;
+  }, [rows]);
+  const wow = useMemo(() => weekDeltas(rows || []), [rows]);
+  const oppGap = useMemo(() => opportunityGap(rows || []), [rows]);
+  const bw = useMemo(() => bestAndWatch(rows || []), [rows]);
+  const disruptions = useMemo(() => disruptionCounts(rows || []), [rows]);
+
   return (
     <div className="px-4 py-4">
       <div className="mb-4">
@@ -134,6 +158,20 @@ export function PartnerTrend() {
           {shortDateLong(dates[0])} — {shortDateLong(dates[dates.length - 1])}
         </p>
       </div>
+
+      {/* Plan vs Actual hero */}
+      {loading ? (
+        <div className="h-20 bg-black/[0.04] rounded-lg animate-pulse mb-4" />
+      ) : plan ? (
+        <PlanHero plan={plan} />
+      ) : null}
+
+      {/* Week-over-week delta strip */}
+      {loading ? (
+        <div className="h-14 bg-black/[0.04] rounded-lg animate-pulse mb-5" />
+      ) : (
+        <WowStrip wow={wow} />
+      )}
 
       {/* Metric toggle */}
       <div className="grid grid-cols-3 gap-1 p-1 bg-black/[0.04] rounded-lg mb-5 text-[14px]">
@@ -214,6 +252,63 @@ export function PartnerTrend() {
         </div>
       </div>
 
+      {/* Opportunity sentence */}
+      {!loading && oppGap ? (
+        <p className="text-[14px] text-[var(--color-text-secondary)] mb-5 leading-relaxed">
+          ஒவ்வொரு தறியும் இந்த 14 நாட்களின் சிறந்த நாளுக்கு ஈடாக ஓடியிருந்தால், மேலும் <span className="font-semibold text-[var(--color-text-primary)]">{fmtRupees(oppGap.rupees)}</span> ({fmtMeters(oppGap.meters)}) வந்திருக்கும்.
+        </p>
+      ) : null}
+
+      {/* Best · Watch callouts */}
+      {!loading && (bw.best || bw.watch) ? (
+        <div className={`grid ${bw.best && bw.watch ? "grid-cols-2" : "grid-cols-1"} gap-2 mb-5`}>
+          {bw.best ? (
+            <div className="rounded-lg border border-[var(--color-status-green)]/30 bg-[var(--color-status-green)]/10 px-3 py-2.5">
+              <div className="text-[11px] uppercase tracking-wide text-[var(--color-status-green)] font-semibold mb-0.5">முன்னணி</div>
+              <div className="text-[15px] font-bold text-[var(--color-text-primary)]">{bw.best.loom}</div>
+              <div className="text-[12px] text-[var(--color-text-secondary)] tabular-nums">{fmtRupees(bw.best.revenue)}</div>
+            </div>
+          ) : null}
+          {bw.watch ? (
+            <div className={`rounded-lg border px-3 py-2.5 ${
+              bw.watch.reason === "warp-gaps"
+                ? "border-[var(--color-status-red)]/30 bg-[var(--color-status-red)]/10"
+                : "border-[var(--color-status-amber)]/30 bg-[var(--color-status-amber)]/10"
+            }`}>
+              <div className={`text-[11px] uppercase tracking-wide font-semibold mb-0.5 ${
+                bw.watch.reason === "warp-gaps" ? "text-[var(--color-status-red)]" : "text-[var(--color-status-amber)]"
+              }`}>கவனிக்க</div>
+              <div className="text-[15px] font-bold text-[var(--color-text-primary)]">{bw.watch.loom}</div>
+              <div className="text-[12px] text-[var(--color-text-secondary)]">{bw.watch.detail}</div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* Disruption summary */}
+      {!loading && (disruptions.runout + disruptions.stopped + disruptions.powercut > 0) ? (
+        <div className="mb-5">
+          <div className="text-[13px] font-semibold tracking-wide text-[var(--color-text-secondary)] mb-2">இடையூறுகள்</div>
+          <div className="flex flex-wrap gap-2">
+            {disruptions.runout > 0 ? (
+              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-[var(--color-status-amber)]/10 text-[var(--color-status-amber)] text-[12px] font-medium">
+                <span className="tabular-nums font-bold">{disruptions.runout}</span> Run out
+              </span>
+            ) : null}
+            {disruptions.stopped > 0 ? (
+              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-[var(--color-status-red)]/10 text-[var(--color-status-red)] text-[12px] font-medium">
+                <span className="tabular-nums font-bold">{disruptions.stopped}</span> Stopped
+              </span>
+            ) : null}
+            {disruptions.powercut > 0 ? (
+              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-[var(--color-text-primary)]/10 text-[var(--color-text-primary)] text-[12px] font-medium">
+                <span className="tabular-nums font-bold">{disruptions.powercut}</span> Power cut
+              </span>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
       {/* Per-loom totals */}
       <div>
         <div className="text-[13px] font-semibold tracking-wide text-[var(--color-text-secondary)] mb-2">தறி மொத்தம்</div>
@@ -237,8 +332,11 @@ export function PartnerTrend() {
               return (
                 <li key={loom} className="py-3 flex items-center gap-3">
                   <span className="w-10 text-[16px] font-bold tabular-nums">{loom}</span>
-                  <span className="flex-1 text-[14px] text-[var(--color-text-secondary)] tabular-nums">
-                    {fmtMeters(t?.meters ?? 0)} · {fmtRupees(t?.revenue ?? 0)}
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-[14px] text-[var(--color-text-secondary)] tabular-nums truncate">
+                      {fmtMeters(t?.meters ?? 0)} · {fmtRupees(t?.revenue ?? 0)}
+                    </span>
+                    {planByLoom.get(loom) ? <PlanBar plan={planByLoom.get(loom)!} /> : null}
                   </span>
                   <span className="text-[18px] font-bold tabular-nums text-[var(--color-text-primary)]">{value}</span>
                 </li>
@@ -271,6 +369,105 @@ function Legend({ tint, label }: { tint: string; label: string }) {
     <span className="inline-flex items-center gap-1">
       <span className={`inline-block w-3 h-3 rounded-[2px] ${tint}`} />
       {label}
+    </span>
+  );
+}
+
+type PlanShape = NonNullable<ReturnType<typeof planSummary>>;
+
+function bandClasses(band: PlanShape["band"]): { bar: string; text: string; bg: string; border: string; chip: string } {
+  if (band === "on") {
+    return {
+      bar: "bg-[var(--color-status-green)]",
+      text: "text-[var(--color-status-green)]",
+      bg: "bg-[var(--color-status-green)]/8",
+      border: "border-[var(--color-status-green)]/25",
+      chip: "On track",
+    };
+  }
+  if (band === "near") {
+    return {
+      bar: "bg-[var(--color-status-amber)]",
+      text: "text-[var(--color-status-amber)]",
+      bg: "bg-[var(--color-status-amber)]/8",
+      border: "border-[var(--color-status-amber)]/25",
+      chip: "Near plan",
+    };
+  }
+  return {
+    bar: "bg-[var(--color-status-red)]",
+    text: "text-[var(--color-status-red)]",
+    bg: "bg-[var(--color-status-red)]/8",
+    border: "border-[var(--color-status-red)]/25",
+    chip: "Below plan",
+  };
+}
+
+function PlanHero({ plan }: { plan: PlanShape }) {
+  const cls = bandClasses(plan.band);
+  const fillPct = Math.min(100, Math.round(plan.pct * 100));
+  return (
+    <div className={`rounded-lg border ${cls.border} ${cls.bg} px-3 py-3 mb-4`}>
+      <div className="flex items-baseline justify-between mb-2">
+        <div className="text-[13px] font-semibold tracking-wide text-[var(--color-text-secondary)]">திட்டம் vs நிஜம்</div>
+        <span className={`text-[11px] uppercase tracking-wide font-semibold ${cls.text}`}>{cls.chip}</span>
+      </div>
+      <div className="flex items-baseline gap-2 mb-2">
+        <span className={`text-[24px] font-bold tabular-nums ${cls.text}`}>{Math.round(plan.pct * 100)}%</span>
+        <span className="text-[13px] text-[var(--color-text-secondary)] tabular-nums">
+          {fmtMeters(plan.meters)} / {fmtMeters(plan.target)}
+        </span>
+      </div>
+      <div className="h-2 rounded-full bg-black/[0.06] overflow-hidden">
+        <div className={`h-full ${cls.bar}`} style={{ width: `${fillPct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function WowStrip({ wow }: { wow: ReturnType<typeof weekDeltas> }) {
+  if (wow.metersPct === null && wow.revenuePct === null && wow.effPctPoints === null) return null;
+  return (
+    <div className="grid grid-cols-3 gap-2 mb-5">
+      <WowCell label="மீட்டர்" value={fmtSignedPct(wow.metersPct)} frac={wow.metersPct} />
+      <WowCell label="வருமானம்" value={fmtSignedPct(wow.revenuePct)} frac={wow.revenuePct} />
+      <WowCell label="Performance" value={fmtSignedPp(wow.effPctPoints)} frac={wow.effPctPoints} />
+    </div>
+  );
+}
+
+function WowCell({ label, value, frac }: { label: string; value: string; frac: number | null }) {
+  const tone =
+    frac === null
+      ? "text-[var(--color-text-secondary)]"
+      : Math.abs(frac) < 0.02
+        ? "text-[var(--color-text-secondary)]"
+        : frac > 0
+          ? "text-[var(--color-status-green)]"
+          : "text-[var(--color-status-red)]";
+  const arrow =
+    frac === null || Math.abs(frac) < 0.02 ? "·" : frac > 0 ? "▲" : "▼";
+  return (
+    <div className="rounded-lg border border-[var(--color-border-hairline)] px-3 py-2">
+      <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-secondary)] font-semibold mb-0.5">{label}</div>
+      <div className={`text-[15px] font-bold tabular-nums ${tone}`}>
+        <span className="mr-1">{arrow}</span>
+        {value}
+      </div>
+      <div className="text-[10px] text-[var(--color-text-secondary)]">முன்/பின் 7 நாட்கள்</div>
+    </div>
+  );
+}
+
+function PlanBar({ plan }: { plan: PlanShape }) {
+  const cls = bandClasses(plan.band);
+  const fillPct = Math.min(100, Math.round(plan.pct * 100));
+  return (
+    <span className="mt-1 flex items-center gap-2">
+      <span className="flex-1 h-1 rounded-full bg-black/[0.06] overflow-hidden">
+        <span className={`block h-full ${cls.bar}`} style={{ width: `${fillPct}%` }} />
+      </span>
+      <span className={`text-[11px] tabular-nums font-semibold ${cls.text}`}>{Math.round(plan.pct * 100)}%</span>
     </span>
   );
 }
