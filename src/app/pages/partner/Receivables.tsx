@@ -29,11 +29,19 @@ function ageDays(s: string): number | null {
 type StatusKind = "unbilled" | "paid" | "partial" | "pending";
 
 function statusKind(r: ReceivableRow): StatusKind {
-  const s = r.paymentStatus.toLowerCase();
+  const s = (r.paymentStatus || r.status || "").toLowerCase();
   if (!r.invoiceNumber || s.includes("unbilled")) return "unbilled";
-  if (r.pendingBalance <= 0 && r.invoiceAmount > 0) return "paid";
   if (s.includes("partial")) return "partial";
+  if (effectivePending(r) <= 0 && r.invoiceAmount > 0) return "paid";
   return "pending";
+}
+
+function effectivePending(r: ReceivableRow): number {
+  const s = (r.paymentStatus || r.status || "").toLowerCase();
+  if (s.includes("partial") && r.invoiceAmount > 0) {
+    return Math.max(0, r.invoiceAmount - (r.receipts || 0));
+  }
+  return r.pendingBalance;
 }
 
 function statusBadge(kind: StatusKind, overdueDays: number | null) {
@@ -50,7 +58,7 @@ export function PartnerReceivables() {
   const [rows, setRows] = useState<ReceivableRow[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [filter, setFilter] = useState<FilterKey>("pending");
+  const [filter, setFilter] = useState<FilterKey>("partial");
 
   useEffect(() => {
     let alive = true;
@@ -76,7 +84,7 @@ export function PartnerReceivables() {
       if (filter === "overdue") {
         if (kind === "paid" || kind === "unbilled") return false;
         const od = ageDays(r.dueDate);
-        return od !== null && od > 0 && r.pendingBalance > 0;
+        return od !== null && od > 0 && effectivePending(r) > 0;
       }
       return true;
     });
@@ -92,7 +100,7 @@ export function PartnerReceivables() {
         g = { party: key, total: 0, count: 0, rows: [] };
         map.set(key, g);
       }
-      g.total += r.pendingBalance;
+      g.total += effectivePending(r);
       g.count += 1;
       g.rows.push(r);
     }
@@ -233,7 +241,7 @@ export function PartnerReceivables() {
                             {r.receipts > 0 && <> · Recd {fmtRupees(r.receipts)}</>}
                           </span>
                           <span className="font-semibold">
-                            {fmtRupees(r.pendingBalance)}
+                            {fmtRupees(effectivePending(r))}
                           </span>
                         </div>
                       </li>
