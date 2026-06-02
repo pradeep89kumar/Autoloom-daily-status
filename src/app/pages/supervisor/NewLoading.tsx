@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { Check, ChevronDown } from "lucide-react";
 import { LOOM_CATALOG } from "../../lib/looms";
-import { Button } from "../../components/ui/Button";
+import { Button } from "../../components/ui/button";
 import { showToast } from "../../components/Toast";
 import {
   fetchCatalog,
