@@ -1,8 +1,12 @@
+import { useState } from "react";
 import { useNavigate } from "react-router";
-import { Wallet, HardHat, Lock, ChevronRight } from "lucide-react";
+import { Wallet, HardHat, Lock, ChevronRight, Download, Share } from "lucide-react";
+import { usePwaInstall } from "../lib/usePwaInstall";
 
 export function RoleSelector() {
   const navigate = useNavigate();
+  const install = usePwaInstall();
+  const [showIosHelp, setShowIosHelp] = useState(false);
 
   return (
     <div
@@ -47,6 +51,33 @@ export function RoleSelector() {
           onClick={() => navigate("/supervisor")}
         />
       </div>
+
+      {install.kind === "available" && (
+        <button
+          onClick={() => install.prompt()}
+          className="mt-8 inline-flex items-center gap-2 px-4 py-2.5 rounded-full bg-[var(--color-brand-primary)] text-white text-[14px] font-semibold active:translate-y-px"
+        >
+          <Download className="w-4 h-4" strokeWidth={2} />
+          Install on this device
+        </button>
+      )}
+
+      {install.kind === "ios" && (
+        <button
+          onClick={() => setShowIosHelp((v) => !v)}
+          className="mt-8 inline-flex items-center gap-2 px-4 py-2.5 rounded-full border border-[var(--color-border-hairline)] text-[var(--color-text-primary)] text-[14px] font-semibold active:translate-y-px"
+        >
+          <Share className="w-4 h-4" strokeWidth={2} />
+          Add to Home Screen
+        </button>
+      )}
+
+      {showIosHelp && install.kind === "ios" && (
+        <div className="mt-3 max-w-sm text-[13px] text-[var(--color-text-secondary)] text-center leading-relaxed">
+          In Safari, tap the <span className="font-semibold">Share</span> button,
+          then choose <span className="font-semibold">"Add to Home Screen"</span>.
+        </div>
+      )}
 
       <footer className="mt-auto pt-10 text-center">
         <p className="text-[12px] text-[var(--color-text-secondary)]">
