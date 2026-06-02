@@ -165,7 +165,7 @@ export function LoomFloor() {
       {target && (
         <div className="px-4 pt-3 pb-3 border-b border-[var(--color-border-hairline)]">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-[12px] font-medium text-[var(--color-text-secondary)]">முன்னேற்றம்</span>
+            <span className="text-[12px] font-medium text-[var(--color-text-secondary)]">Progress</span>
             <span className="text-[11px] text-[var(--color-text-secondary)]">
               {targetLogged}/{totalLooms} பதிவு · {targetPendingCount} மீதம்
             </span>
