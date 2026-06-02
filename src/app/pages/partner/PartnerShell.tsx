@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate } from "react-router";
-import { Calendar, TrendingUp, ArrowLeft } from "lucide-react";
+import { Calendar, TrendingUp, Wallet, ArrowLeft } from "lucide-react";
 import { setRole } from "../../lib/persona";
 
 export function PartnerShell() {
@@ -27,9 +27,10 @@ export function PartnerShell() {
         <Outlet />
       </main>
 
-      <nav className="absolute bottom-0 inset-x-0 h-16 bg-white border-t border-[var(--color-border-hairline)] grid grid-cols-2">
+      <nav className="absolute bottom-0 inset-x-0 h-16 bg-white border-t border-[var(--color-border-hairline)] grid grid-cols-3">
         <TabLink to="/partner/day" label="Day" Icon={Calendar} />
         <TabLink to="/partner/trend" label="Trend" Icon={TrendingUp} />
+        <TabLink to="/partner/receivables" label="Receivables" Icon={Wallet} />
       </nav>
     </div>
   );

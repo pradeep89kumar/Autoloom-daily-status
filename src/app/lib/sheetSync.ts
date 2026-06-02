@@ -297,3 +297,32 @@ export async function fetchMasterOrders(): Promise<Record<string, unknown>[]> {
     return [];
   }
 }
+
+export interface ReceivableRow {
+  orderId: string;
+  paaguId: string;
+  customerName: string;
+  status: string;
+  invoiceAmount: number;
+  invoiceNumber: string;
+  invoiceDate: string;
+  dueDate: string;
+  receipts: number;
+  receivedOn: string;
+  paymentStatus: string;
+  pendingBalance: number;
+  party: string;
+}
+
+export async function fetchMasterReceivables(): Promise<ReceivableRow[]> {
+  if (!ENDPOINT) return [];
+  try {
+    const res = await fetch(`${ENDPOINT}?mode=master-receivables`, { method: "GET" });
+    const data = await res.json();
+    if (!data?.ok || !Array.isArray(data.rows)) return [];
+    return data.rows as ReceivableRow[];
+  } catch (e) {
+    console.warn("[sheetSync] fetchMasterReceivables failed", e);
+    return [];
+  }
+}

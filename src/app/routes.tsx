@@ -11,6 +11,7 @@ import { PinGate } from "./pages/partner/PinGate";
 import { PartnerShell } from "./pages/partner/PartnerShell";
 import { PartnerDay } from "./pages/partner/Day";
 import { PartnerTrend } from "./pages/partner/Trend";
+import { PartnerReceivables } from "./pages/partner/Receivables";
 import { PartnerGuard } from "./pages/partner/PartnerGuard";
 
 export const router = createBrowserRouter([
@@ -44,6 +45,7 @@ export const router = createBrowserRouter([
           { index: true, Component: PartnerDay },
           { path: "day", Component: PartnerDay },
           { path: "trend", Component: PartnerTrend },
+          { path: "receivables", Component: PartnerReceivables },
         ],
       },
     ],

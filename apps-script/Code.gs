@@ -29,6 +29,7 @@ var ORDERS_CUSTOMER_COL = 3; // column C — party / customer name
 var MASTER_SHEET_ID = "1WbsCT_pgF9tk5XgIWQSabH7D_ZWt7bqHks_-c7BcQBo";
 var MASTER_PRODUCTION_TAB = "Looms_Production";
 var MASTER_ORDER_TAB = "Order";
+var MASTER_PAAGU_TAB = "Paagu ID";
 
 // WhatsApp manual relay — single number that forwards to the partner group.
 // Leave WA_ENABLED=false until Twilio creds are added; messages are no-ops.
@@ -98,6 +99,9 @@ function doGet(e) {
   }
   if (mode === "master-orders") {
     return _json({ ok: true, rows: _readMasterOrders() });
+  }
+  if (mode === "master-receivables") {
+    return _json({ ok: true, rows: _readMasterReceivables() });
   }
   return _json({ ok: true, rows: _readLightRows(21) });
 }
@@ -441,6 +445,48 @@ function _readMasterOrders() {
       row[key] = val;
     }
     if (any) out.push(row);
+  }
+  return out;
+}
+
+/**
+ * Master tab "Paagu ID" — receivables view.
+ * Cols: A Order ID · B Paagu ID · C Customer Name · E Status
+ *  AA Invoice amount · AB Invoice number · AC Invoice date · AD Due date
+ *  AE Receipts · AF Received On · AG Payment status
+ *  AN Pending Balance · AP Party
+ */
+function _readMasterReceivables() {
+  var sh = SpreadsheetApp.openById(MASTER_SHEET_ID).getSheetByName(MASTER_PAAGU_TAB);
+  if (!sh) return [];
+  var last = sh.getLastRow();
+  if (last < 2) return [];
+  var values = sh.getRange(2, 1, last - 1, 42).getValues(); // A..AP
+  var out = [];
+  for (var i = 0; i < values.length; i++) {
+    var r = values[i];
+    var party = String(r[41] || "").trim();
+    var orderId = String(r[0] || "").trim();
+    var paaguId = String(r[1] || "").trim();
+    var pending = Number(r[39]) || 0;
+    var invoiceAmount = Number(r[26]) || 0;
+    var invoiceNumber = String(r[27] || "").trim();
+    if (!party && !invoiceNumber && !pending && !invoiceAmount && !orderId && !paaguId) continue;
+    out.push({
+      orderId: orderId,
+      paaguId: paaguId,
+      customerName: String(r[2] || ""),
+      status: String(r[4] || ""),
+      invoiceAmount: invoiceAmount,
+      invoiceNumber: invoiceNumber,
+      invoiceDate: r[28] ? _ymd(_toDate(r[28]) || new Date(r[28])) : "",
+      dueDate: r[29] ? _ymd(_toDate(r[29]) || new Date(r[29])) : "",
+      receipts: Number(r[30]) || 0,
+      receivedOn: r[31] ? _ymd(_toDate(r[31]) || new Date(r[31])) : "",
+      paymentStatus: String(r[32] || "").trim(),
+      pendingBalance: pending,
+      party: party
+    });
   }
   return out;
 }
