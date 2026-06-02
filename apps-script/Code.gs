@@ -466,12 +466,13 @@ function _readMasterReceivables() {
   for (var i = 0; i < values.length; i++) {
     var r = values[i];
     var party = String(r[41] || "").trim();
+    if (!party) continue;
     var orderId = String(r[0] || "").trim();
     var paaguId = String(r[1] || "").trim();
     var pending = Number(r[39]) || 0;
     var invoiceAmount = Number(r[26]) || 0;
     var invoiceNumber = String(r[27] || "").trim();
-    if (!party && !invoiceNumber && !pending && !invoiceAmount && !orderId && !paaguId) continue;
+    if (!invoiceNumber && !pending && !invoiceAmount && !orderId && !paaguId) continue;
     out.push({
       orderId: orderId,
       paaguId: paaguId,

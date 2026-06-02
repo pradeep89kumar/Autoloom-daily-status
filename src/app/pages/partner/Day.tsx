@@ -119,14 +119,14 @@ export function PartnerDay() {
         <SkeletonHeader />
       ) : (
         <>
-          <p className="text-[15px] leading-relaxed text-[var(--color-text-primary)] mb-5">
+          <p className="text-[17px] leading-relaxed text-[var(--color-text-primary)] mb-5">
             {dayBrief(date, summary, inProgress)}
           </p>
 
           {summary.shiftsLogged > 0 && (
             <div className="grid grid-cols-3 gap-3 mb-6 pb-5 border-b border-[var(--color-border-hairline)]">
-              <Stat label="Metres" value={fmtMeters(summary.meters)} />
-              <Stat label="Revenue" value={fmtRupees(summary.revenue)} />
+              <Stat label="Revenue" value={fmtRupees(summary.revenue)} primary />
+              <Stat label="Metres" value={fmtMeters(summary.meters)} subtle />
               <Stat
                 label="Efficiency"
                 value={fmtPercent(summary.weightedEfficiency)}
@@ -158,12 +158,17 @@ export function PartnerDay() {
   );
 }
 
-function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function Stat({ label, value, sub, primary, subtle }: { label: string; value: string; sub?: string; primary?: boolean; subtle?: boolean }) {
+  const valueCls = primary
+    ? "text-xl font-bold tabular-nums text-[var(--color-text-primary)]"
+    : subtle
+      ? "text-[15px] font-medium tabular-nums text-[var(--color-text-secondary)]"
+      : "text-xl font-semibold tabular-nums";
   return (
     <div>
-      <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-secondary)] mb-1">{label}</div>
-      <div className="text-lg font-semibold tabular-nums">{value}</div>
-      {sub && <div className="text-[11px] text-[var(--color-text-secondary)] mt-0.5">{sub}</div>}
+      <div className="text-[12px] uppercase tracking-wide text-[var(--color-text-secondary)] mb-1">{label}</div>
+      <div className={valueCls}>{value}</div>
+      {sub && <div className="text-[12px] text-[var(--color-text-secondary)] mt-0.5">{sub}</div>}
     </div>
   );
 }
@@ -205,23 +210,23 @@ function LoomRow({
         className="w-full py-4 flex items-center gap-3 text-left"
       >
         <div className="w-10 shrink-0">
-          <div className="text-base font-semibold">{data.loom}</div>
+          <div className="text-lg font-semibold">{data.loom}</div>
         </div>
         <div className="flex-1 min-w-0">
           {orderLine && (
-            <div className="text-[13px] text-[var(--color-text-primary)] font-medium truncate mb-0.5">
+            <div className="text-[14px] text-[var(--color-text-primary)] font-medium truncate mb-0.5">
               {orderLine}
             </div>
           )}
           <div className="flex items-baseline gap-2">
-            <span className="text-[15px] font-medium tabular-nums">{fmtMeters(data.meters)}</span>
-            <span className="text-[13px] text-[var(--color-text-secondary)] tabular-nums">{fmtRupees(data.revenue)}</span>
+            <span className="text-[18px] font-bold tabular-nums text-[var(--color-text-primary)]">{fmtRupees(data.revenue)}</span>
+            <span className="text-[13px] text-[var(--color-text-secondary)] tabular-nums">{fmtMeters(data.meters)}</span>
           </div>
           {stateLabel && (
-            <div className="text-[12px] text-[var(--color-text-secondary)] mt-0.5">{stateLabel}</div>
+            <div className="text-[13px] text-[var(--color-text-secondary)] mt-0.5">{stateLabel}</div>
           )}
         </div>
-        <div className={`text-[15px] font-medium tabular-nums ${bandClass(data.weightedEfficiency)}`}>
+        <div className={`text-[16px] font-semibold tabular-nums ${bandClass(data.weightedEfficiency)}`}>
           {fmtPercent(data.weightedEfficiency)}
         </div>
         <div className="text-[var(--color-text-secondary)]">
@@ -249,8 +254,8 @@ function ShiftCard({ letter, row }: { letter: "A" | "B"; row: MasterRow | undefi
   if (!row) {
     return (
       <div className="rounded-lg border border-[var(--color-border-hairline)] p-3">
-        <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-secondary)]">Shift {letter}</div>
-        <div className="text-[13px] text-[var(--color-text-secondary)] mt-2">Not yet logged.</div>
+        <div className="text-[12px] uppercase tracking-wide text-[var(--color-text-secondary)]">Shift {letter}</div>
+        <div className="text-[14px] text-[var(--color-text-secondary)] mt-2">Not yet logged.</div>
       </div>
     );
   }
@@ -258,16 +263,16 @@ function ShiftCard({ letter, row }: { letter: "A" | "B"; row: MasterRow | undefi
   return (
     <div className="rounded-lg border border-[var(--color-border-hairline)] p-3">
       <div className="flex items-baseline justify-between mb-2">
-        <span className="text-[11px] uppercase tracking-wide text-[var(--color-text-secondary)]">Shift {letter}</span>
-        <span className={`text-[12px] font-medium tabular-nums ${bandClass(row.efficiency)}`}>
+        <span className="text-[12px] uppercase tracking-wide text-[var(--color-text-secondary)]">Shift {letter}</span>
+        <span className={`text-[13px] font-semibold tabular-nums ${bandClass(row.efficiency)}`}>
           {fmtPercent(row.efficiency)}
         </span>
       </div>
-      <div className="text-[13px] text-[var(--color-text-primary)] mb-1 truncate">{row.weaver || "—"}</div>
-      <div className="text-[12px] text-[var(--color-text-secondary)] mb-2 truncate">{row.orderTag || "—"}</div>
-      <dl className="space-y-1 text-[12px]">
-        <Item k="Metres" v={fmtMeters(row.meters)} />
-        <Item k="Revenue" v={fmtRupees(row.revenue)} />
+      <div className="text-[14px] text-[var(--color-text-primary)] mb-1 truncate">{row.weaver || "—"}</div>
+      <div className="text-[13px] text-[var(--color-text-secondary)] mb-2 truncate">{row.orderTag || "—"}</div>
+      <dl className="space-y-1 text-[13px]">
+        <Item k="Revenue" v={fmtRupees(row.revenue)} primary />
+        <Item k="Metres" v={fmtMeters(row.meters)} subtle />
         <Item k="RPM" v={row.rpm ? row.rpm.toFixed(0) : "—"} />
         <Item k="Achieved pick" v={row.achievedPick ? row.achievedPick.toFixed(0) : "—"} />
         {stateLabel && <Item k="End state" v={stateLabel} />}
@@ -276,11 +281,16 @@ function ShiftCard({ letter, row }: { letter: "A" | "B"; row: MasterRow | undefi
   );
 }
 
-function Item({ k, v }: { k: string; v: string }) {
+function Item({ k, v, primary, subtle }: { k: string; v: string; primary?: boolean; subtle?: boolean }) {
+  const vCls = primary
+    ? "tabular-nums text-[var(--color-text-primary)] font-semibold"
+    : subtle
+      ? "tabular-nums text-[var(--color-text-secondary)]"
+      : "tabular-nums text-[var(--color-text-primary)]";
   return (
     <div className="flex justify-between gap-2">
       <dt className="text-[var(--color-text-secondary)]">{k}</dt>
-      <dd className="tabular-nums text-[var(--color-text-primary)]">{v}</dd>
+      <dd className={vCls}>{v}</dd>
     </div>
   );
 }

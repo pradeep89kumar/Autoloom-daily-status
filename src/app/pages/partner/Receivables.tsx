@@ -85,7 +85,8 @@ export function PartnerReceivables() {
   const grouped = useMemo(() => {
     const map = new Map<string, { party: string; total: number; count: number; rows: ReceivableRow[] }>();
     for (const r of filtered) {
-      const key = r.party || "(no party)";
+      const key = (r.party || "").trim();
+      if (!key) continue;
       let g = map.get(key);
       if (!g) {
         g = { party: key, total: 0, count: 0, rows: [] };
