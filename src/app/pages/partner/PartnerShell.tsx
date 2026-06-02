@@ -7,7 +7,7 @@ export function PartnerShell() {
 
   function exit() {
     setRole("supervisor");
-    navigate("/", { replace: true });
+    navigate("/role", { replace: true });
   }
 
   return (

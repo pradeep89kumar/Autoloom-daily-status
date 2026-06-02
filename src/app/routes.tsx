@@ -1,5 +1,6 @@
 import { createBrowserRouter } from "react-router";
 
+import { Splash } from "./pages/Splash";
 import { RoleSelector } from "./pages/RoleSelector";
 import { MobileLayout } from "./layouts/MobileLayout";
 import { LoomFloor } from "./pages/supervisor/LoomFloor";
@@ -17,6 +18,10 @@ import { PartnerGuard } from "./pages/partner/PartnerGuard";
 export const router = createBrowserRouter([
   {
     path: "/",
+    Component: Splash,
+  },
+  {
+    path: "/role",
     Component: RoleSelector,
   },
   {

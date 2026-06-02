@@ -82,7 +82,7 @@ export function PinGate() {
       </div>
 
       <button
-        onClick={() => navigate("/")}
+        onClick={() => navigate("/role")}
         className="mt-10 text-sm text-[var(--color-text-secondary)] underline-offset-4 hover:underline"
       >
         Back
