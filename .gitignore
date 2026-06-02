@@ -33,3 +33,6 @@ yarn-error.log*
 # misc
 .cache
 coverage
+
+# icon source (resized into icon-*.png at build time)
+public/source.png
