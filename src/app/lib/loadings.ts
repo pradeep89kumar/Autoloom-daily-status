@@ -61,7 +61,8 @@ export function mergeLoadings(remote: RemoteLoading[]): LoadingEvent[] {
 }
 
 /**
- * A loading takes effect for any shift whose START is at or after capturedAt.
+ * A loading takes effect from its capturedAt onward. It applies to the target
+ * shift if captured before that shift ends — including loadings logged mid-shift.
  * Returns the most-recent applicable loading for `loomId` against `target`.
  */
 export function findLoadingForTarget(
@@ -70,10 +71,10 @@ export function findLoadingForTarget(
   loadings: LoadingEvent[],
 ): LoadingEvent | null {
   const id = loomId.toUpperCase();
-  const targetStart = shiftWindow(fromYmd(target.date), target.shift).start.getTime();
+  const targetEnd = shiftWindow(fromYmd(target.date), target.shift).end.getTime();
   for (const e of loadings) {
     if (e.loomId !== id) continue;
-    if (new Date(e.capturedAt).getTime() <= targetStart) return e;
+    if (new Date(e.capturedAt).getTime() < targetEnd) return e;
   }
   return null;
 }
