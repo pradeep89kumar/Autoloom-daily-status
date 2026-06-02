@@ -41,17 +41,17 @@ function lastNDates(n: number): Date[] {
 interface Cell {
   meters: number;
   revenue: number;
-  effTimesM: number;
+  target: number;
 }
 
 function buildGrid(rows: MasterRangeRow[]): Map<string, Cell> {
   const grid = new Map<string, Cell>();
   for (const r of rows) {
     const key = `${r.loom}|${r.date}`;
-    const cur = grid.get(key) || { meters: 0, revenue: 0, effTimesM: 0 };
+    const cur = grid.get(key) || { meters: 0, revenue: 0, target: 0 };
     cur.meters += r.meters;
     cur.revenue += r.revenue;
-    cur.effTimesM += r.efficiency * r.meters;
+    cur.target += r.targetMeters;
     grid.set(key, cur);
   }
   return grid;
@@ -65,7 +65,7 @@ function metricValue(c: Cell | undefined, m: Metric): number | null {
   }
   if (m === "meters") return c.meters;
   if (m === "revenue") return c.revenue;
-  return c.effTimesM / c.meters;
+  return c.target > 0 ? c.meters / c.target : null;
 }
 
 function tintForEfficiency(frac: number | null): string {
@@ -126,14 +126,14 @@ export function PartnerTrend() {
   }, [grid, dates, metric]);
 
   const totals = useMemo(() => {
-    const out = new Map<string, { meters: number; revenue: number; effTimesM: number }>();
-    for (const loom of LOOMS) out.set(loom, { meters: 0, revenue: 0, effTimesM: 0 });
+    const out = new Map<string, { meters: number; revenue: number; target: number }>();
+    for (const loom of LOOMS) out.set(loom, { meters: 0, revenue: 0, target: 0 });
     for (const r of rows || []) {
       const cur = out.get(r.loom);
       if (!cur) continue;
       cur.meters += r.meters;
       cur.revenue += r.revenue;
-      cur.effTimesM += r.efficiency * r.meters;
+      cur.target += r.targetMeters;
     }
     return out;
   }, [rows]);
@@ -313,7 +313,7 @@ export function PartnerTrend() {
           <ul className="divide-y divide-[var(--color-border-hairline)]">
             {LOOMS.map((loom) => {
               const t = totals.get(loom);
-              const eff = t && t.meters > 0 ? t.effTimesM / t.meters : 0;
+              const eff = t && t.target > 0 ? t.meters / t.target : 0;
               const value =
                 metric === "meters"
                   ? fmtMeters(t?.meters ?? 0)

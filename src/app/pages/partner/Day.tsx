@@ -287,12 +287,13 @@ function ShiftCard({ letter, row }: { letter: "A" | "B"; row: MasterRow | undefi
     );
   }
   const meta = endStateMeta(row.state);
+  const perf = row.targetMeters > 0 ? row.meters / row.targetMeters : 0;
   return (
     <div className="rounded-lg border border-[var(--color-border-hairline)] p-3">
       <div className="flex items-baseline justify-between mb-2">
         <span className="text-[13px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)]">Shift {letter}</span>
-        <span className={`text-[15px] font-bold tabular-nums ${bandClass(row.efficiency)}`}>
-          {fmtPercent(row.efficiency)}
+        <span className={`text-[15px] font-bold tabular-nums ${bandClass(perf)}`}>
+          {fmtPercent(perf)}
         </span>
       </div>
       <div className="text-[16px] font-semibold text-[var(--color-text-primary)] mb-1 truncate">{row.weaver || "—"}</div>

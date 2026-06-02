@@ -12,18 +12,18 @@ export interface DaySummary {
 export function summarizeDay(rows: MasterRow[]): DaySummary {
   let meters = 0;
   let revenue = 0;
-  let effTimesM = 0;
+  let target = 0;
   const loomSet = new Set<string>();
   for (const r of rows) {
     meters += r.meters;
     revenue += r.revenue;
-    effTimesM += r.efficiency * r.meters;
+    target += r.targetMeters;
     if (r.meters > 0 || r.efficiency > 0) loomSet.add(r.loom);
   }
   return {
     meters,
     revenue,
-    weightedEfficiency: meters > 0 ? effTimesM / meters : 0,
+    weightedEfficiency: target > 0 ? meters / target : 0,
     loomsReporting: loomSet.size,
     loomsTotal: 8,
     shiftsLogged: rows.length,
@@ -111,11 +111,11 @@ export function perLoomTotals(rows: MasterRow[]): LoomDayTotal[] {
   }
   const out: LoomDayTotal[] = [];
   for (const [loom, list] of byLoom) {
-    let meters = 0, revenue = 0, effTimesM = 0;
+    let meters = 0, revenue = 0, target = 0;
     for (const r of list) {
       meters += r.meters;
       revenue += r.revenue;
-      effTimesM += r.efficiency * r.meters;
+      target += r.targetMeters;
     }
     // End state: prefer B's state if present, else A's.
     const b = list.find((r) => r.shift === "B");
@@ -125,7 +125,7 @@ export function perLoomTotals(rows: MasterRow[]): LoomDayTotal[] {
       loom,
       meters,
       revenue,
-      weightedEfficiency: meters > 0 ? effTimesM / meters : 0,
+      weightedEfficiency: target > 0 ? meters / target : 0,
       endState,
       shifts: list.length,
       rows: list.sort((x, y) => (x.shift < y.shift ? -1 : 1)),
@@ -211,14 +211,14 @@ export function weekDeltas(rows: MasterRangeRow[]): WeekDelta {
   const priorDates = new Set(dates.slice(0, cut));
   const recentDates = new Set(dates.slice(cut));
   const agg = (set: Set<string>) => {
-    let m = 0, r = 0, em = 0;
+    let m = 0, r = 0, t = 0;
     for (const row of rows) {
       if (!set.has(row.date)) continue;
       m += row.meters;
       r += row.revenue;
-      em += row.efficiency * row.meters;
+      t += row.targetMeters;
     }
-    return { m, r, eff: m > 0 ? em / m : 0 };
+    return { m, r, eff: t > 0 ? m / t : 0 };
   };
   const a = agg(priorDates);
   const b = agg(recentDates);
@@ -293,7 +293,10 @@ export function bestAndWatch(rows: MasterRangeRow[]): BestWatch {
     }
     a.meters += r.meters;
     a.revenue += r.revenue;
-    if (r.meters > 0) a.effShifts.push({ eff: r.efficiency, date: r.date });
+    if (r.meters > 0) {
+      const perf = r.targetMeters > 0 ? r.meters / r.targetMeters : 0;
+      a.effShifts.push({ eff: perf, date: r.date });
+    }
     const meta = endStateMeta(r.state);
     if (meta?.tone === "runout") a.runoutDays.add(r.date);
   }
