@@ -141,19 +141,33 @@ export function efficiencyBand(frac: number): "high" | "good" | "fair" | "low" {
   return "low";
 }
 
-/**
- * State pill copy — only show when end-of-day state isn't a normal running state.
- * Returns null when nothing worth surfacing.
- */
-export function endStateLabel(state: string): string | null {
+export type StateTone = "runout" | "stopped" | "powercut" | "knotting";
+
+export interface StateMeta {
+  label: string;
+  tone: StateTone;
+}
+
+// Master sheet's "Complited"/"Completed" maps to "Run out": for the partner
+// the warp finished and a new one is being prepared. Returns null for normal
+// running states or unknown raw values so the UI shows nothing in the calm case.
+export function endStateMeta(state: string): StateMeta | null {
   const s = state.toUpperCase().trim();
   if (!s) return null;
   if (s === "RUNNING" || s === "START") return null;
-  if (s === "COMPLITED" || s === "COMPLETED") return "Completed";
-  if (s === "RUNOUT" || s === "RUN OUT") return "Run out";
-  if (s === "ERROR_STOP" || s === "ERROR STOP" || s === "STOP") return "Stopped";
-  if (s === "POWERCUT" || s === "POWER CUT") return "Power cut";
-  if (s === "KNOTTING") return "Knotting";
-  // Fallback: title-case the first word.
-  return s.charAt(0) + s.slice(1).toLowerCase();
+  if (s === "COMPLITED" || s === "COMPLETED" || s === "RUNOUT" || s === "RUN OUT") {
+    return { label: "Run out", tone: "runout" };
+  }
+  if (s === "ERROR_STOP" || s === "ERROR STOP" || s === "STOP" || s === "STOPPED") {
+    return { label: "Stopped", tone: "stopped" };
+  }
+  if (s === "POWERCUT" || s === "POWER CUT") {
+    return { label: "Power cut", tone: "powercut" };
+  }
+  if (s === "KNOTTING") return { label: "Knotting", tone: "knotting" };
+  return null;
+}
+
+export function endStateLabel(state: string): string | null {
+  return endStateMeta(state)?.label ?? null;
 }

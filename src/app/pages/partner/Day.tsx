@@ -10,8 +10,9 @@ import {
   dayBrief,
   shortDateLong,
   efficiencyBand,
-  endStateLabel,
+  endStateMeta,
   type LoomDayTotal,
+  type StateTone,
 } from "../../lib/partnerCopy";
 
 function ymd(d: Date): string {
@@ -164,6 +165,24 @@ export function PartnerDay() {
   );
 }
 
+function StatusPill({ label, tone }: { label: string; tone: StateTone }) {
+  const styles: Record<StateTone, { bg: string; fg: string }> = {
+    runout:   { bg: "color-mix(in srgb, var(--color-status-amber) 12%, white)", fg: "var(--color-status-amber)" },
+    powercut: { bg: "color-mix(in srgb, var(--color-status-amber) 12%, white)", fg: "var(--color-status-amber)" },
+    stopped:  { bg: "color-mix(in srgb, var(--color-status-red) 10%, white)",   fg: "var(--color-status-red)" },
+    knotting: { bg: "var(--color-bg-subtle, #F3F4F6)",                          fg: "var(--color-text-secondary)" },
+  };
+  const s = styles[tone];
+  return (
+    <span
+      className="inline-flex items-center px-2 py-0.5 rounded-full text-[12px] font-semibold"
+      style={{ backgroundColor: s.bg, color: s.fg }}
+    >
+      {label}
+    </span>
+  );
+}
+
 function Stat({ label, value, sub, primary, subtle }: { label: string; value: string; sub?: string; primary?: boolean; subtle?: boolean }) {
   const valueCls = primary
     ? "text-[22px] font-bold tabular-nums text-[var(--color-text-primary)]"
@@ -196,7 +215,7 @@ function LoomRow({
   open: boolean;
   onToggle: () => void;
 }) {
-  const stateLabel = endStateLabel(data.endState);
+  const meta = endStateMeta(data.endState);
 
   // Show order tag(s) on the row itself. If A and B carry different orders,
   // show both joined by " · "; otherwise show the single tag.
@@ -228,8 +247,10 @@ function LoomRow({
             <span className="text-[18px] font-bold tabular-nums text-[var(--color-text-primary)]">{fmtRupees(data.revenue)}</span>
             <span className="text-[14px] text-[var(--color-text-secondary)] tabular-nums">{fmtMeters(data.meters)}</span>
           </div>
-          {stateLabel && (
-            <div className="text-[14px] text-[var(--color-text-secondary)] mt-0.5">{stateLabel}</div>
+          {meta && (
+            <div className="mt-1.5">
+              <StatusPill label={meta.label} tone={meta.tone} />
+            </div>
           )}
         </div>
         <div className={`text-[18px] font-bold tabular-nums ${bandClass(data.weightedEfficiency)}`}>
@@ -265,7 +286,7 @@ function ShiftCard({ letter, row }: { letter: "A" | "B"; row: MasterRow | undefi
       </div>
     );
   }
-  const stateLabel = endStateLabel(row.state);
+  const meta = endStateMeta(row.state);
   return (
     <div className="rounded-lg border border-[var(--color-border-hairline)] p-3">
       <div className="flex items-baseline justify-between mb-2">
@@ -281,8 +302,12 @@ function ShiftCard({ letter, row }: { letter: "A" | "B"; row: MasterRow | undefi
         <Item k="mtr" v={fmtMeters(row.meters)} subtle />
         <Item k="RPM" v={row.rpm ? row.rpm.toFixed(0) : "—"} />
         <Item k="Achieved pick" v={row.achievedPick ? row.achievedPick.toFixed(0) : "—"} />
-        {stateLabel && <Item k="End state" v={stateLabel} />}
       </dl>
+      {meta && (
+        <div className="mt-2">
+          <StatusPill label={meta.label} tone={meta.tone} />
+        </div>
+      )}
     </div>
   );
 }
