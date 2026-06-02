@@ -57,7 +57,7 @@ export function PartnerReceivables() {
   const [rows, setRows] = useState<ReceivableRow[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [filter, setFilter] = useState<FilterKey>("partial");
+  const [filter, setFilter] = useState<FilterKey>("pending");
 
   useEffect(() => {
     let alive = true;
