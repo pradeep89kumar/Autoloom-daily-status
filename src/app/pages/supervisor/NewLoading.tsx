@@ -27,6 +27,9 @@ export function NewLoading() {
   const returnTo = params.get("return") || "";
 
   const [selected, setSelected] = useState<string>(presetLoom);
+  const [customer, setCustomer] = useState<string | null>(null);
+  const [customerQuery, setCustomerQuery] = useState("");
+  const [customerOpen, setCustomerOpen] = useState(false);
   const [order, setOrder] = useState<OrderOption | null>(null);
   const [orderQuery, setOrderQuery] = useState("");
   const [orderOpen, setOrderOpen] = useState(false);
@@ -75,22 +78,48 @@ export function NewLoading() {
   const isRunoutResume =
     !!presetLoom && loomStatuses[presetLoom]?.kind === "completed-needs-loading";
 
+  const customers = useMemo(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const o of orders) {
+      const c = o.customer || "";
+      const key = c.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(c);
+    }
+    out.sort((a, b) => {
+      if (!a) return 1;
+      if (!b) return -1;
+      return a.toLowerCase().localeCompare(b.toLowerCase());
+    });
+    return out;
+  }, [orders]);
+
+  const customerMatches = useMemo(() => {
+    const q = customerQuery.trim().toLowerCase();
+    if (!q) return customers;
+    return customers.filter((c) => (c || "(no customer)").toLowerCase().includes(q));
+  }, [customers, customerQuery]);
+
+  const designsForCustomer = useMemo(() => {
+    if (customer === null) return [] as OrderOption[];
+    return orders.filter((o) => (o.customer || "") === customer);
+  }, [orders, customer]);
+
   const orderMatches = useMemo(() => {
     const q = orderQuery.trim().toLowerCase();
-    if (!q) return orders;
-    return orders.filter(
-      (o) =>
-        o.design.toLowerCase().includes(q) ||
-        o.customer.toLowerCase().includes(q),
-    );
-  }, [orders, orderQuery]);
+    if (!q) return designsForCustomer;
+    return designsForCustomer.filter((o) => o.design.toLowerCase().includes(q));
+  }, [designsForCustomer, orderQuery]);
 
   const errors: Record<string, string> = {};
   if (!selected) errors.loom = "Pick a loom.";
   else if (!isAvailable(selected) && !showAllLooms) {
     errors.loom = "Loom is currently running. Toggle Show all looms to override.";
   }
-  if (!order) errors.order = "Select from the order list.";
+  if (customer === null) errors.customer = "Select a customer.";
+  if (!order) errors.order = "Select a design.";
 
   const isComplete = Object.keys(errors).length === 0;
 
@@ -135,10 +164,13 @@ export function NewLoading() {
       if (orderOpen && !t.closest("[data-order-popover]") && !t.closest("[data-order-trigger]")) {
         setOrderOpen(false);
       }
+      if (customerOpen && !t.closest("[data-customer-popover]") && !t.closest("[data-customer-trigger]")) {
+        setCustomerOpen(false);
+      }
     };
     document.addEventListener("mousedown", onClick);
     return () => document.removeEventListener("mousedown", onClick);
-  }, [orderOpen]);
+  }, [orderOpen, customerOpen]);
 
   return (
     <div className="pb-28">
@@ -213,22 +245,89 @@ export function NewLoading() {
           </div>
         )}
 
+        <Field label="Customer" error={touched ? errors.customer : undefined}>
+          <div className="relative">
+            <button
+              type="button"
+              data-customer-trigger
+              onClick={() => setCustomerOpen((v) => !v)}
+              className={`input text-left flex items-center justify-between ${
+                touched && errors.customer ? "input-error" : ""
+              }`}
+            >
+              <span className={customer !== null ? "" : "text-[var(--color-text-secondary)]"}>
+                {customer === null ? "Select customer" : customer || "(no customer)"}
+              </span>
+              <ChevronDown className="w-4 h-4 text-[var(--color-text-secondary)]" strokeWidth={1.5} />
+            </button>
+            {customerOpen && (
+              <div
+                data-customer-popover
+                className="absolute z-10 mt-1 w-full bg-white border border-[var(--color-border-hairline)] rounded-lg shadow-sm overflow-hidden"
+              >
+                <div className="p-2 border-b border-[var(--color-border-hairline)]">
+                  <input
+                    autoFocus
+                    value={customerQuery}
+                    onChange={(e) => setCustomerQuery(e.target.value)}
+                    placeholder="Search customer…"
+                    className="input"
+                  />
+                </div>
+                <ul className="max-h-56 overflow-auto">
+                  {customerMatches.length === 0 && (
+                    <li className="px-3 py-2.5 text-[13px] text-[var(--color-text-secondary)] italic">
+                      No matches. Populate Sheet3 col C (customer) first.
+                    </li>
+                  )}
+                  {customerMatches.map((c, idx) => {
+                    const isSel = customer !== null && customer === c;
+                    return (
+                      <li key={`${c}||${idx}`}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCustomer(c);
+                            setOrder(null);
+                            setCustomerQuery("");
+                            setCustomerOpen(false);
+                          }}
+                          className="w-full text-left px-3 py-2.5 hover:bg-gray-50 flex items-center justify-between"
+                        >
+                          <span className="text-[15px]">{c || "(no customer)"}</span>
+                          {isSel && <Check className="w-4 h-4" strokeWidth={1.5} />}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
+          </div>
+          {orders.length === 0 && (
+            <p className="text-[11px] text-[var(--color-text-secondary)] mt-1">
+              Order list is empty. Populate Sheet3 (B = design, C = customer) in the Google Sheet.
+            </p>
+          )}
+        </Field>
+
         <Field label="Design" error={touched ? errors.order : undefined}>
           <div className="relative">
             <button
               type="button"
               data-order-trigger
+              disabled={customer === null}
               onClick={() => setOrderOpen((v) => !v)}
               className={`input text-left flex items-center justify-between ${
                 touched && errors.order ? "input-error" : ""
-              }`}
+              } ${customer === null ? "opacity-60 cursor-not-allowed" : ""}`}
             >
               <span className={order ? "" : "text-[var(--color-text-secondary)]"}>
-                {order ? order.design : "Select design"}
+                {order ? order.design : customer === null ? "Select customer first" : "Select design"}
               </span>
               <ChevronDown className="w-4 h-4 text-[var(--color-text-secondary)]" strokeWidth={1.5} />
             </button>
-            {orderOpen && (
+            {orderOpen && customer !== null && (
               <div
                 data-order-popover
                 className="absolute z-10 mt-1 w-full bg-white border border-[var(--color-border-hairline)] rounded-lg shadow-sm overflow-hidden"
@@ -238,14 +337,14 @@ export function NewLoading() {
                     autoFocus
                     value={orderQuery}
                     onChange={(e) => setOrderQuery(e.target.value)}
-                    placeholder="Search design or customer…"
+                    placeholder="Search design…"
                     className="input"
                   />
                 </div>
                 <ul className="max-h-56 overflow-auto">
                   {orderMatches.length === 0 && (
                     <li className="px-3 py-2.5 text-[13px] text-[var(--color-text-secondary)] italic">
-                      No matches. Add the order in Sheet3 (B = design, C = customer) first.
+                      No designs for this customer.
                     </li>
                   )}
                   {orderMatches.map((o, idx) => {
@@ -259,12 +358,7 @@ export function NewLoading() {
                           onClick={() => { setOrder(o); setOrderQuery(""); setOrderOpen(false); }}
                           className="w-full text-left px-3 py-2.5 hover:bg-gray-50 flex items-center justify-between"
                         >
-                          <span className="flex flex-col">
-                            <span className="text-[15px]">{o.design}</span>
-                            {o.customer && (
-                              <span className="text-[12px] text-[var(--color-text-secondary)]">{o.customer}</span>
-                            )}
-                          </span>
+                          <span className="text-[15px]">{o.design}</span>
                           {isSel && <Check className="w-4 h-4" strokeWidth={1.5} />}
                         </button>
                       </li>
@@ -274,16 +368,6 @@ export function NewLoading() {
               </div>
             )}
           </div>
-          {order && order.customer && (
-            <p className="text-[12px] text-[var(--color-text-secondary)] mt-1.5">
-              Customer · <span className="text-[var(--color-text-primary)] font-medium">{order.customer}</span>
-            </p>
-          )}
-          {orders.length === 0 && (
-            <p className="text-[11px] text-[var(--color-text-secondary)] mt-1">
-              Order list is empty. Populate Sheet3 (B = design, C = customer) in the Google Sheet.
-            </p>
-          )}
         </Field>
       </div>
 
