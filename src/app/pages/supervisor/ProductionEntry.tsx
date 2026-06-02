@@ -18,12 +18,12 @@ import { addWeaver, getWeavers } from "../../lib/weavers";
 import { loadingStatusForTarget, mergeLoadings, type LoadingEvent } from "../../lib/loadings";
 
 const STATE_OPTIONS: { value: LoomState; label: string }[] = [
-  { value: "running",     label: "ஓடுகிறது" },
-  { value: "start",       label: "துவக்கம்" },
-  { value: "knotting",    label: "கணு" },
-  { value: "runout",      label: "முடிந்தது" },
-  { value: "error_stop",  label: "தடை" },
-  { value: "powercut",    label: "மின் தடை" },
+  { value: "running",     label: "Running" },
+  { value: "start",       label: "Start" },
+  { value: "knotting",    label: "Knotting" },
+  { value: "runout",      label: "Runout" },
+  { value: "error_stop",  label: "Stopped" },
+  { value: "powercut",    label: "Powercut" },
 ];
 
 const QUICK_TAGS = [
@@ -361,7 +361,7 @@ export function ProductionEntry() {
 
       <div className="px-4 mt-4 flex flex-col gap-3.5">
         <fieldset disabled={locked || needsLoading} className="contents">
-        <Field label="ஷிப்ட்">
+        <Field label="Shift">
           <div className="flex items-center gap-3">
             <SegToggle
               options={[
@@ -446,7 +446,7 @@ export function ProductionEntry() {
         </Field>
 
         <Field
-          label="பிக் கவுண்டர் ரீடிங்"
+          label="Pick counter reading"
           hint={
             pickRegression
               ? `Lower than last reading ${lastPickK}k. Re-check before submitting.`
@@ -474,7 +474,7 @@ export function ProductionEntry() {
           </div>
         </Field>
 
-        <Field label="இந்த ஷிப்டின் mtr" error={touched ? errors.meters : undefined}>
+        <Field label="Meters this shift" error={touched ? errors.meters : undefined}>
           <div className="relative">
             <input
               type="text"
@@ -531,7 +531,7 @@ export function ProductionEntry() {
               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-[var(--color-text-secondary)] pointer-events-none">%</span>
             </div>
           </Field>
-          <Field label="நேரம் (விருப்பம்)" error={touched ? errors.runtime : undefined}>
+          <Field label="Time (optional)" error={touched ? errors.runtime : undefined}>
             <div className="relative">
               <input
                 type="text"
@@ -567,7 +567,7 @@ export function ProductionEntry() {
           </div>
         </Field>
 
-        <Field label="விரைவு குறிப்பு (விருப்பம்)">
+        <Field label="Quick note (optional)">
           <div className="flex flex-wrap gap-1.5">
             {QUICK_TAGS.map((t) => {
               const on = tags.includes(t);
