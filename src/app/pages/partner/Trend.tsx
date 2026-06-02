@@ -5,7 +5,6 @@ import {
   fmtPercent,
   fmtRupees,
   shortDateLong,
-  planSummary,
   planSummaryForLoom,
   weekDeltas,
   opportunityGap,
@@ -139,7 +138,6 @@ export function PartnerTrend() {
     return out;
   }, [rows]);
 
-  const plan = useMemo(() => planSummary(rows || []), [rows]);
   const planByLoom = useMemo(() => {
     const m = new Map<string, ReturnType<typeof planSummaryForLoom>>();
     for (const loom of LOOMS) m.set(loom, planSummaryForLoom(rows || [], loom));
@@ -158,13 +156,6 @@ export function PartnerTrend() {
           {shortDateLong(dates[0])} — {shortDateLong(dates[dates.length - 1])}
         </p>
       </div>
-
-      {/* Plan vs Actual hero */}
-      {loading ? (
-        <div className="h-20 bg-black/[0.04] rounded-lg animate-pulse mb-4" />
-      ) : plan ? (
-        <PlanHero plan={plan} />
-      ) : null}
 
       {/* Week-over-week delta strip */}
       {loading ? (
@@ -373,7 +364,7 @@ function Legend({ tint, label }: { tint: string; label: string }) {
   );
 }
 
-type PlanShape = NonNullable<ReturnType<typeof planSummary>>;
+type PlanShape = NonNullable<ReturnType<typeof planSummaryForLoom>>;
 
 function bandClasses(band: PlanShape["band"]): { bar: string; text: string; bg: string; border: string; chip: string } {
   if (band === "on") {
@@ -401,28 +392,6 @@ function bandClasses(band: PlanShape["band"]): { bar: string; text: string; bg: 
     border: "border-[var(--color-status-red)]/25",
     chip: "Below plan",
   };
-}
-
-function PlanHero({ plan }: { plan: PlanShape }) {
-  const cls = bandClasses(plan.band);
-  const fillPct = Math.min(100, Math.round(plan.pct * 100));
-  return (
-    <div className={`rounded-lg border ${cls.border} ${cls.bg} px-3 py-3 mb-4`}>
-      <div className="flex items-baseline justify-between mb-2">
-        <div className="text-[13px] font-semibold tracking-wide text-[var(--color-text-secondary)]">திட்டம் vs நிஜம்</div>
-        <span className={`text-[11px] uppercase tracking-wide font-semibold ${cls.text}`}>{cls.chip}</span>
-      </div>
-      <div className="flex items-baseline gap-2 mb-2">
-        <span className={`text-[24px] font-bold tabular-nums ${cls.text}`}>{Math.round(plan.pct * 100)}%</span>
-        <span className="text-[13px] text-[var(--color-text-secondary)] tabular-nums">
-          {fmtMeters(plan.meters)} / {fmtMeters(plan.target)}
-        </span>
-      </div>
-      <div className="h-2 rounded-full bg-black/[0.06] overflow-hidden">
-        <div className={`h-full ${cls.bar}`} style={{ width: `${fillPct}%` }} />
-      </div>
-    </div>
-  );
 }
 
 function WowStrip({ wow }: { wow: ReturnType<typeof weekDeltas> }) {
