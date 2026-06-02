@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
-import { AlertCircle, Check, Clock, Plus } from "lucide-react";
+import { AlertCircle, Check, Clock } from "lucide-react";
 import { LOOM_CATALOG } from "../../lib/looms";
 
 import {
@@ -151,12 +151,6 @@ export function LoomFloor() {
           className="inline-flex items-center px-2.5 py-1.5 rounded-lg border border-[var(--color-border-hairline)] text-sm hover:bg-gray-50"
         >
           Past logs
-        </button>
-        <button
-          onClick={() => navigate("/supervisor/new-loading")}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[var(--color-border-hairline)] text-sm hover:bg-gray-50"
-        >
-          <Plus className="w-4 h-4" strokeWidth={1.5} /> New loading
         </button>
       </div>
 

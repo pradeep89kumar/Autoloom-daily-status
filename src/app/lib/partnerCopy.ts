@@ -63,28 +63,33 @@ export function shortDateLong(d: Date): string {
 }
 
 /**
- * One calm sentence summarizing the day. Tone-locked — no exclamations,
- * no thousand separators below 1,000, no emojis.
+ * One calm Tamil sentence summarizing the day for the partner snapshot.
+ * Keeps numerals in Arabic digits for fast reading; tone is factual, no exclamations.
  */
 export function dayBrief(date: Date, summary: DaySummary, isInProgress: boolean): string {
+  const dateLabel = shortDateLong(date);
+
   if (summary.shiftsLogged === 0) {
-    if (isInProgress) return `Entries for ${shortDateLong(date)} are still being captured.`;
-    return `No production was logged on ${shortDateLong(date)}.`;
+    if (isInProgress) return `${dateLabel} — பதிவுகள் இன்னும் வந்துகொண்டிருக்கின்றன.`;
+    return `${dateLabel} — பதிவு இல்லை.`;
   }
 
   const looms = summary.loomsReporting;
-  const loomWord = looms === 1 ? "one loom" : `${numberWord(looms)} looms`;
+  const loomWord = looms === 1 ? "ஒரு தறி" : `${looms} தறிகள்`;
   const m = Math.round(summary.meters);
-  const meters = m < 1000 ? `${m} metres` : `${m.toLocaleString("en-IN")} metres`;
+  const meters = `${m.toLocaleString("en-IN")} மீட்டர்`;
   const rupees = fmtRupees(summary.revenue);
   const eff = Math.round(summary.weightedEfficiency * 100);
 
   const lead = isInProgress
-    ? `So far on ${shortDateLong(date)}`
-    : `On ${shortDateLong(date)}`;
+    ? `${dateLabel} (இன்றுவரை)`
+    : dateLabel;
 
-  return `${lead}, ${loomWord} produced ${meters}, earning ${rupees} at an average of ${eff}%.`;
+  return `${lead} — ${loomWord} ${meters} நெய்தன. வருமானம் ${rupees}, சராசரி திறன் ${eff}%.`;
 }
+
+// Keep numberWord helper around in case other copy reuses it.
+void numberWord;
 
 /** Aggregate per-loom totals for the Day ledger. */
 export interface LoomDayTotal {
