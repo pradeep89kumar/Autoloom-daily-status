@@ -85,10 +85,15 @@ export function PartnerTrend() {
     setLoading(true);
     const from = ymd(dates[0]);
     const to = ymd(dates[dates.length - 1]);
+    const startedAt = Date.now();
     fetchMasterRange(from, to).then((r) => {
       if (!alive) return;
-      setRows(r);
-      setLoading(false);
+      const wait = Math.max(0, 400 - (Date.now() - startedAt));
+      setTimeout(() => {
+        if (!alive) return;
+        setRows(r);
+        setLoading(false);
+      }, wait);
     });
     return () => {
       alive = false;
@@ -124,7 +129,7 @@ export function PartnerTrend() {
   return (
     <div className="px-4 py-4">
       <div className="mb-4">
-        <h2 className="text-[18px] font-bold mb-1 text-[var(--color-text-primary)]">Last {DAYS} days</h2>
+        <h2 className="text-[18px] font-bold mb-1 text-[var(--color-text-primary)]">கடந்த {DAYS} நாட்கள்</h2>
         <p className="text-[14px] text-[var(--color-text-secondary)]">
           {shortDateLong(dates[0])} — {shortDateLong(dates[dates.length - 1])}
         </p>
@@ -132,14 +137,14 @@ export function PartnerTrend() {
 
       {/* Metric toggle */}
       <div className="grid grid-cols-3 gap-1 p-1 bg-black/[0.04] rounded-lg mb-5 text-[14px]">
-        <SegBtn active={metric === "efficiency"} onClick={() => setMetric("efficiency")} label="Efficiency" />
-        <SegBtn active={metric === "meters"} onClick={() => setMetric("meters")} label="Metres" />
-        <SegBtn active={metric === "revenue"} onClick={() => setMetric("revenue")} label="Revenue" />
+        <SegBtn active={metric === "efficiency"} onClick={() => setMetric("efficiency")} label="Performance" />
+        <SegBtn active={metric === "meters"} onClick={() => setMetric("meters")} label="mtr" />
+        <SegBtn active={metric === "revenue"} onClick={() => setMetric("revenue")} label="வருமானம்" />
       </div>
 
       {/* Heatmap */}
       <div className="mb-6">
-        <div className="text-[13px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)] mb-2">Daily heatmap</div>
+        <div className="text-[13px] font-semibold tracking-wide text-[var(--color-text-secondary)] mb-2">நாள் வாரியான பார்வை</div>
         {loading ? (
           <div className="h-44 bg-black/[0.04] rounded animate-pulse" />
         ) : (
@@ -171,7 +176,7 @@ export function PartnerTrend() {
                           : tintForMagnitude(v, maxByMetric);
                       const title = `${loom} · ${shortDateLong(d)}\n${
                         v === null
-                          ? "No data"
+                          ? "தரவு இல்லை"
                           : metric === "efficiency"
                             ? fmtPercent(v)
                             : metric === "meters"
@@ -202,8 +207,8 @@ export function PartnerTrend() {
             </>
           ) : (
             <>
-              <Legend tint="bg-[var(--color-text-primary)]/[0.06]" label="lower" />
-              <Legend tint="bg-[var(--color-text-primary)]/[0.36]" label="higher" />
+              <Legend tint="bg-[var(--color-text-primary)]/[0.06]" label="குறைவு" />
+              <Legend tint="bg-[var(--color-text-primary)]/[0.36]" label="அதிகம்" />
             </>
           )}
         </div>
@@ -211,7 +216,7 @@ export function PartnerTrend() {
 
       {/* Per-loom totals */}
       <div>
-        <div className="text-[13px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)] mb-2">Loom totals</div>
+        <div className="text-[13px] font-semibold tracking-wide text-[var(--color-text-secondary)] mb-2">தறி மொத்தம்</div>
         {loading ? (
           <div className="space-y-2">
             {LOOMS.map((l) => (

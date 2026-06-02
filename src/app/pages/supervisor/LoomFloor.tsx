@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
-import { AlertCircle, Check, Clock } from "lucide-react";
+import { AlertCircle, Check, Clock, Users } from "lucide-react";
 import { LOOM_CATALOG } from "../../lib/looms";
 
 import {
@@ -145,12 +145,19 @@ export function LoomFloor() {
   return (
     <div className="pb-8">
       {/* Top action bar — always present */}
-      <div className="px-4 py-2.5 border-b border-[var(--color-border-hairline)] flex items-center justify-end gap-2">
+      <div className="px-4 py-2.5 border-b border-[var(--color-border-hairline)] flex items-center justify-between gap-2">
+        <button
+          onClick={() => navigate("/role")}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[var(--color-border-hairline)] text-sm hover:bg-gray-50"
+        >
+          <Users className="w-4 h-4" strokeWidth={1.6} />
+          Switch
+        </button>
         <button
           onClick={() => navigate("/supervisor/logs")}
           className="inline-flex items-center px-2.5 py-1.5 rounded-lg border border-[var(--color-border-hairline)] text-sm hover:bg-gray-50"
         >
-          Past logs
+          பழைய பதிவுகள்
         </button>
       </div>
 
@@ -158,9 +165,9 @@ export function LoomFloor() {
       {target && (
         <div className="px-4 pt-3 pb-3 border-b border-[var(--color-border-hairline)]">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-[12px] font-medium text-[var(--color-text-secondary)]">Progress</span>
+            <span className="text-[12px] font-medium text-[var(--color-text-secondary)]">முன்னேற்றம்</span>
             <span className="text-[11px] text-[var(--color-text-secondary)]">
-              {targetLogged}/{totalLooms} logged · {targetPendingCount} left
+              {targetLogged}/{totalLooms} பதிவு · {targetPendingCount} மீதம்
             </span>
           </div>
           <div className="flex gap-1">
@@ -313,7 +320,7 @@ function relativeTag(d: Date): string | null {
   const today = ymd(new Date());
   const yesterday = ymd(addDays(new Date(), -1));
   const target = ymd(d);
-  if (target === today) return "Today";
-  if (target === yesterday) return "Yesterday";
+  if (target === today) return "இன்று";
+  if (target === yesterday) return "நேற்று";
   return null;
 }

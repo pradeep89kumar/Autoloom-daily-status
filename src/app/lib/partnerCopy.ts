@@ -46,7 +46,7 @@ export function fmtRupees(n: number): string {
 export function fmtMeters(n: number): string {
   if (!isFinite(n)) return "—";
   const rounded = Math.round(n);
-  return `${rounded.toLocaleString("en-IN")} m`;
+  return `${rounded.toLocaleString("en-IN")} mtr`;
 }
 
 export function fmtPercent(frac: number): string {
@@ -77,7 +77,7 @@ export function dayBrief(date: Date, summary: DaySummary, isInProgress: boolean)
   const looms = summary.loomsReporting;
   const loomWord = looms === 1 ? "ஒரு தறி" : `${looms} தறிகள்`;
   const m = Math.round(summary.meters);
-  const meters = `${m.toLocaleString("en-IN")} மீட்டர்`;
+  const meters = `${m.toLocaleString("en-IN")} mtr`;
   const rupees = fmtRupees(summary.revenue);
   const eff = Math.round(summary.weightedEfficiency * 100);
 

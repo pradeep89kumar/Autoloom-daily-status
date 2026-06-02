@@ -27,8 +27,8 @@ export function RoleSelector() {
       </header>
 
       <div className="w-full max-w-sm mt-10 mb-6">
-        <p className="text-[13px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)] text-center">
-          Who is this?
+        <p className="text-[13px] font-semibold tracking-wide text-[var(--color-text-secondary)] text-center">
+          யார் பயன்படுத்துகிறார்?
         </p>
       </div>
 

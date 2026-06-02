@@ -62,10 +62,15 @@ export function PartnerReceivables() {
   useEffect(() => {
     let alive = true;
     setLoading(true);
+    const startedAt = Date.now();
     fetchMasterReceivables().then((r) => {
       if (!alive) return;
-      setRows(r);
-      setLoading(false);
+      const wait = Math.max(0, 400 - (Date.now() - startedAt));
+      setTimeout(() => {
+        if (!alive) return;
+        setRows(r);
+        setLoading(false);
+      }, wait);
     });
     return () => {
       alive = false;

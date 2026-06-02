@@ -32,8 +32,8 @@ function dateLabel(d: Date): string {
   const target = new Date(d);
   target.setHours(0, 0, 0, 0);
   const diffDays = Math.round((today.getTime() - target.getTime()) / 86400000);
-  if (diffDays === 0) return "Today";
-  if (diffDays === 1) return "Yesterday";
+  if (diffDays === 0) return "இன்று";
+  if (diffDays === 1) return "நேற்று";
   return shortDateLong(d);
 }
 
@@ -52,10 +52,16 @@ export function PartnerDay() {
     let alive = true;
     setLoading(true);
     setExpanded(null);
+    const startedAt = Date.now();
     fetchMasterDay(ymd(date)).then((r) => {
       if (!alive) return;
-      setRows(r);
-      setLoading(false);
+      const elapsed = Date.now() - startedAt;
+      const wait = Math.max(0, 400 - elapsed);
+      setTimeout(() => {
+        if (!alive) return;
+        setRows(r);
+        setLoading(false);
+      }, wait);
     });
     return () => {
       alive = false;
@@ -126,9 +132,9 @@ export function PartnerDay() {
           {summary.shiftsLogged > 0 && (
             <div className="grid grid-cols-3 gap-3 mb-6 pb-5 border-b border-[var(--color-border-hairline)]">
               <Stat label="Revenue" value={fmtRupees(summary.revenue)} primary />
-              <Stat label="Metres" value={fmtMeters(summary.meters)} subtle />
+              <Stat label="mtr" value={fmtMeters(summary.meters)} subtle />
               <Stat
-                label="Efficiency"
+                label="Performance"
                 value={fmtPercent(summary.weightedEfficiency)}
                 sub={`${summary.loomsReporting} of ${summary.loomsTotal} looms`}
               />
@@ -255,7 +261,7 @@ function ShiftCard({ letter, row }: { letter: "A" | "B"; row: MasterRow | undefi
     return (
       <div className="rounded-lg border border-[var(--color-border-hairline)] p-3">
         <div className="text-[13px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)]">Shift {letter}</div>
-        <div className="text-[14px] text-[var(--color-text-secondary)] mt-2">Not yet logged.</div>
+        <div className="text-[14px] text-[var(--color-text-secondary)] mt-2">தரவு இல்லை</div>
       </div>
     );
   }
@@ -272,7 +278,7 @@ function ShiftCard({ letter, row }: { letter: "A" | "B"; row: MasterRow | undefi
       <div className="text-[14px] text-[var(--color-text-secondary)] mb-2 truncate">{row.orderTag || "—"}</div>
       <dl className="space-y-1 text-[14px]">
         <Item k="Revenue" v={fmtRupees(row.revenue)} primary />
-        <Item k="Metres" v={fmtMeters(row.meters)} subtle />
+        <Item k="mtr" v={fmtMeters(row.meters)} subtle />
         <Item k="RPM" v={row.rpm ? row.rpm.toFixed(0) : "—"} />
         <Item k="Achieved pick" v={row.achievedPick ? row.achievedPick.toFixed(0) : "—"} />
         {stateLabel && <Item k="End state" v={stateLabel} />}
@@ -300,8 +306,8 @@ function EmptyState({ date, inProgress }: { date: Date; inProgress: boolean }) {
     <div className="py-10 text-center">
       <p className="text-[15px] text-[var(--color-text-secondary)]">
         {inProgress
-          ? "No shift entries logged yet for today."
-          : `No production was logged on ${shortDateLong(date)}.`}
+          ? "தரவு இல்லை — இன்றைய பதிவுகள் இன்னும் வரவில்லை."
+          : `தரவு இல்லை · ${shortDateLong(date)}`}
       </p>
     </div>
   );
