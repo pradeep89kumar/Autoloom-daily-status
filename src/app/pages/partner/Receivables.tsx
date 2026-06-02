@@ -198,15 +198,34 @@ export function PartnerReceivables() {
         <p className="text-[13px] font-semibold text-[var(--color-text-secondary)] uppercase tracking-wide">
           Total {filter === "all" ? "" : filter} pending
         </p>
-        <p className="text-[22px] font-bold tabular-nums text-[var(--color-text-primary)] mt-0.5">{fmtRupees(grandTotal)}</p>
-        <p className="text-[14px] text-[var(--color-text-secondary)] mt-0.5">
-          Across {grouped.length} {grouped.length === 1 ? "party" : "parties"} ·{" "}
-          {merged.length} {merged.length === 1 ? "invoice" : "invoices"}
-        </p>
+        {loading ? (
+          <>
+            <div className="mt-1 h-7 w-32 rounded bg-black/[0.06] animate-pulse" />
+            <div className="mt-2 h-4 w-44 rounded bg-black/[0.04] animate-pulse" />
+          </>
+        ) : (
+          <>
+            <p className="text-[22px] font-bold tabular-nums text-[var(--color-text-primary)] mt-0.5">{fmtRupees(grandTotal)}</p>
+            <p className="text-[14px] text-[var(--color-text-secondary)] mt-0.5">
+              Across {grouped.length} {grouped.length === 1 ? "party" : "parties"} ·{" "}
+              {merged.length} {merged.length === 1 ? "invoice" : "invoices"}
+            </p>
+          </>
+        )}
       </div>
 
       {loading && (
-        <p className="text-[15px] text-[var(--color-text-secondary)] italic">Loading…</p>
+        <ul className="flex flex-col gap-2">
+          {[0, 1, 2, 3].map((i) => (
+            <li
+              key={i}
+              className="rounded-xl border border-[var(--color-border-hairline)] bg-white px-4 py-3"
+            >
+              <div className="h-4 w-40 rounded bg-black/[0.06] animate-pulse" />
+              <div className="mt-2 h-3 w-24 rounded bg-black/[0.04] animate-pulse" />
+            </li>
+          ))}
+        </ul>
       )}
 
       {!loading && grouped.length === 0 && (

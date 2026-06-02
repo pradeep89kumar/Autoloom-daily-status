@@ -28,8 +28,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.png', 'apple-touch-icon.png'],
       manifest: {
-        name: 'Sri Aarumga Tex',
-        short_name: 'Aarumga',
+        name: 'SAT',
+        short_name: 'SAT',
         description: 'Sri Aarumga Tex — power loom logging and partner ledger.',
         id: '/',
         start_url: '/',
