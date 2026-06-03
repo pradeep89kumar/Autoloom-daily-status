@@ -16,8 +16,6 @@ const ACCOUNT_LABEL: Record<CashAccount, string> = {
   iobCc: "IOB CC",
 };
 
-type RangePreset = "month" | "30d" | "90d";
-
 function fmtINR(n: number): string {
   if (!isFinite(n)) return "—";
   const abs = Math.abs(Math.round(n));
@@ -32,18 +30,11 @@ function ymd(d: Date): string {
   return `${y}-${m}-${dd}`;
 }
 
-function rangeFor(preset: RangePreset): { from: string; to: string } {
+function currentMonthRange(): { from: string; to: string } {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const to = ymd(today);
-  if (preset === "month") {
-    const first = new Date(today.getFullYear(), today.getMonth(), 1);
-    return { from: ymd(first), to };
-  }
-  const days = preset === "30d" ? 29 : 89;
-  const from = new Date(today);
-  from.setDate(from.getDate() - days);
-  return { from: ymd(from), to };
+  const first = new Date(today.getFullYear(), today.getMonth(), 1);
+  return { from: ymd(first), to: ymd(today) };
 }
 
 function formatDateHeader(iso: string): string {
@@ -52,11 +43,14 @@ function formatDateHeader(iso: string): string {
   return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", weekday: "short" });
 }
 
+function monthLabel(): string {
+  return new Date().toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+}
+
 export function PartnerCashStatement() {
   const navigate = useNavigate();
   const [account, setAccount] = useState<CashAccount | "all">("all");
   const [direction, setDirection] = useState<"all" | "in" | "out">("all");
-  const [preset, setPreset] = useState<RangePreset>("month");
 
   const [entries, setEntries] = useState<CashLedgerEntry[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -64,7 +58,7 @@ export function PartnerCashStatement() {
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    const { from, to } = rangeFor(preset);
+    const { from, to } = currentMonthRange();
     const filter: CashLedgerFilter = { from, to };
     if (account !== "all") filter.account = account;
     if (direction !== "all") filter.direction = direction;
@@ -82,7 +76,7 @@ export function PartnerCashStatement() {
     return () => {
       alive = false;
     };
-  }, [account, direction, preset]);
+  }, [account, direction]);
 
   const grouped = useMemo(() => groupByDate(entries || []), [entries]);
   const totals = useMemo(() => computeTotals(entries || []), [entries]);
@@ -97,10 +91,12 @@ export function PartnerCashStatement() {
         >
           <ArrowLeft className="w-5 h-5" strokeWidth={1.5} />
         </button>
-        <h1 className="text-base font-semibold">Statement</h1>
+        <div className="flex flex-col">
+          <h1 className="text-base font-semibold leading-tight">Statement</h1>
+          <span className="text-[11px] text-[var(--color-text-secondary)] leading-tight">{monthLabel()}</span>
+        </div>
       </header>
 
-      {/* Filters */}
       <div className="px-4 py-3 border-b border-[var(--color-border-hairline)] shrink-0 space-y-2">
         <ChipRow
           options={[
@@ -114,26 +110,15 @@ export function PartnerCashStatement() {
           value={account}
           onChange={(v) => setAccount(v as CashAccount | "all")}
         />
-        <div className="flex items-center justify-between gap-2">
-          <ChipRow
-            options={[
-              { value: "all", label: "All" },
-              { value: "in", label: "In" },
-              { value: "out", label: "Out" },
-            ]}
-            value={direction}
-            onChange={(v) => setDirection(v as "all" | "in" | "out")}
-          />
-          <ChipRow
-            options={[
-              { value: "month", label: "This month" },
-              { value: "30d", label: "30d" },
-              { value: "90d", label: "90d" },
-            ]}
-            value={preset}
-            onChange={(v) => setPreset(v as RangePreset)}
-          />
-        </div>
+        <ChipRow
+          options={[
+            { value: "all", label: "All" },
+            { value: "in", label: "In" },
+            { value: "out", label: "Out" },
+          ]}
+          value={direction}
+          onChange={(v) => setDirection(v as "all" | "in" | "out")}
+        />
       </div>
 
       <main className="flex-1 min-h-0 overflow-y-auto relative">
@@ -147,7 +132,7 @@ export function PartnerCashStatement() {
 
         {!loading && entries !== null && entries.length === 0 && (
           <div className="px-4 py-10 text-center">
-            <p className="text-[14px] text-[var(--color-text-secondary)]">No entries in this range.</p>
+            <p className="text-[14px] text-[var(--color-text-secondary)]">No entries this month.</p>
           </div>
         )}
 
@@ -179,21 +164,28 @@ export function PartnerCashStatement() {
 }
 
 function EntryRow({ entry }: { entry: CashLedgerEntry }) {
+  const isInternal = !!entry.internal;
   const positive = entry.amount > 0;
+  const amountClass = isInternal
+    ? "text-[var(--color-text-secondary)]"
+    : positive
+    ? "text-[var(--color-status-green)]"
+    : "text-[var(--color-status-red)]";
   return (
     <div className="px-4 py-2.5 border-b border-[var(--color-border-hairline)] flex items-start justify-between gap-3">
       <div className="min-w-0 flex-1">
         <p className="text-[14px] text-[var(--color-text-primary)] truncate">{entry.description || "—"}</p>
-        <p className="text-[11px] text-[var(--color-text-secondary)] mt-0.5 truncate">
-          {ACCOUNT_LABEL[entry.account] || entry.account}
-          {entry.category ? ` · ${entry.category}` : ""}
+        <p className="text-[11px] text-[var(--color-text-secondary)] mt-0.5 truncate flex items-center gap-1.5">
+          <span>{ACCOUNT_LABEL[entry.account] || entry.account}</span>
+          {entry.category ? <span>· {entry.category}</span> : null}
+          {isInternal && (
+            <span className="px-1.5 py-[1px] rounded-full text-[10px] font-medium bg-black/[0.06] text-[var(--color-text-secondary)] uppercase tracking-wide">
+              Internal
+            </span>
+          )}
         </p>
       </div>
-      <span
-        className={`text-[14px] font-medium tabular-nums shrink-0 ${
-          positive ? "text-[var(--color-status-green)]" : "text-[var(--color-status-red)]"
-        }`}
-      >
+      <span className={`text-[14px] font-medium tabular-nums shrink-0 ${amountClass}`}>
         {fmtINR(entry.amount)}
       </span>
     </div>
@@ -270,6 +262,7 @@ function computeTotals(entries: CashLedgerEntry[]): { inflow: number; outflow: n
   let inflow = 0;
   let outflow = 0;
   for (const e of entries) {
+    if (e.internal) continue;
     if (e.amount > 0) inflow += e.amount;
     else outflow += e.amount;
   }

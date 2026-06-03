@@ -372,6 +372,9 @@ export interface CashLedgerEntry {
   account: CashAccount;
   category?: string;
   amount: number;        // signed: positive inflow, negative outflow
+  type?: string;         // raw "Cash flow type" from sheet
+  internal?: boolean;    // true for internal transfers — should render as neutral
+  kind?: string;         // "credit" | "debit" | "withdraw" | "repay" | "interest"
 }
 
 export interface CashLedgerFilter {

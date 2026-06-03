@@ -36,12 +36,27 @@ var MASTER_PAAGU_TAB = "Paagu ID";
 var MASTER_CASHFLOW_TAB = "Master Control";   // ← confirm exact tab name
 
 // Closing balance row (Bank Statement Closing) + per-account columns (1-indexed).
-var CF_ROW_CLOSING = 10;
-var CF_COL_TMB        = 5;   // E
-var CF_COL_IOB_CA     = 7;   // G
-var CF_COL_CASHBOOK   = 9;   // I  (sheet header says "Cash" — functionally Cashbook App)
-var CF_COL_CASH       = 11;  // K  (sheet header says "Petty Cash" — physical wallet cash)
-var CF_COL_IOB_CC     = 13;  // M
+// Each ledger account spans two columns in the data area: a credit (in) col + a debit (out) col.
+// Closing balance values live in the credit column on row 10.
+var CF_ROW_CLOSING        = 10;
+var CF_COL_TMB_CREDIT     = 5;   // E
+var CF_COL_TMB_DEBIT      = 6;   // F
+var CF_COL_IOB_CA_CREDIT  = 7;   // G
+var CF_COL_IOB_CA_DEBIT   = 8;   // H
+var CF_COL_CASHBOOK_CREDIT= 9;   // I  (Cashbook App — "Cash Added")
+var CF_COL_CASHBOOK_DEBIT = 10;  // J  ("Expenses")
+var CF_COL_CASH_CREDIT    = 11;  // K  (Petty Cash — "Cash Added")
+var CF_COL_CASH_DEBIT     = 12;  // L  ("Expenses")
+var CF_COL_IOB_CC_DRAWN   = 13;  // M  (Withdrawal — cash drawn from CC)
+var CF_COL_IOB_CC_REPAY   = 14;  // N  (Repayment / Credit — reduces CC used)
+var CF_COL_IOB_CC_INTEREST= 15;  // O  (Interest)
+
+// Closing-row reads use the credit column for each account.
+var CF_COL_TMB        = CF_COL_TMB_CREDIT;
+var CF_COL_IOB_CA     = CF_COL_IOB_CA_CREDIT;
+var CF_COL_CASHBOOK   = CF_COL_CASHBOOK_CREDIT;
+var CF_COL_CASH       = CF_COL_CASH_CREDIT;
+var CF_COL_IOB_CC     = CF_COL_IOB_CC_DRAWN;
 var CF_IOB_CC_LIMIT   = 2000000;
 
 // Monthly summary cells (per Master Control sheet layout).
@@ -55,7 +70,8 @@ var CF_LEDGER_START_ROW = 15;
 var CF_LEDGER_WIDTH     = 15;     // A..O
 var CF_LEDGER_DATE_COL  = 1;      // A
 var CF_LEDGER_DESC_COL  = 2;      // B
-var CF_LEDGER_CAT_COL   = 3;      // C
+var CF_LEDGER_TYPE_COL  = 3;      // C  Cash flow type (Operating Inflow/Outflow, Internal transfer, Expansion/Asset, Loan and financing, Partner)
+var CF_LEDGER_CAT_COL   = 4;      // D  Cash flow category
 
 // WhatsApp manual relay — single number that forwards to the partner group.
 // Leave WA_ENABLED=false until Twilio creds are added; messages are no-ops.
@@ -572,14 +588,14 @@ function _readCashflow() {
   var opCashflowNet = Number(sh.getRange(CF_CELL_OP_NET).getValue());
   if (!isFinite(opCashflowNet)) opCashflowNet = opInflow + opOutflow;
 
-  // CC drawn this month = sum of column M (Cash Credit withdrawal) from row 15 onwards,
-  // filtered to entries dated within the current calendar month.
+  // CC drawn this month = sum of column M (Withdrawal) for current-month entries.
+  // Sheet stores withdrawals as positive numbers in M, so just sum them.
   var ccDrawn = 0;
   var lastRow = sh.getLastRow();
   if (lastRow >= CF_LEDGER_START_ROW) {
     var n = lastRow - CF_LEDGER_START_ROW + 1;
     var ledgerDates = sh.getRange(CF_LEDGER_START_ROW, CF_LEDGER_DATE_COL, n, 1).getValues();
-    var ledgerCc    = sh.getRange(CF_LEDGER_START_ROW, CF_COL_IOB_CC, n, 1).getValues();
+    var ledgerCc    = sh.getRange(CF_LEDGER_START_ROW, CF_COL_IOB_CC_DRAWN, n, 1).getValues();
     var nowD = new Date();
     var curY = nowD.getFullYear();
     var curM = nowD.getMonth();
@@ -589,8 +605,7 @@ function _readCashflow() {
       if (dRow.getFullYear() !== curY || dRow.getMonth() !== curM) continue;
       var v = Number(ledgerCc[k][0]);
       if (!v || isNaN(v)) continue;
-      // Withdrawal entries appear as negative numbers in the ledger; CC drawn is the absolute outflow.
-      if (v < 0) ccDrawn += -v;
+      ccDrawn += Math.abs(v);
     }
   }
 
@@ -644,13 +659,21 @@ function _readCashLedger(fromYmd, toYmd, accountKey, direction) {
   var fromMs = fromYmd ? _ymdToDate(fromYmd).getTime() : 0;
   var toMs   = toYmd   ? _ymdToDate(toYmd).getTime() + 86399000 : Date.now();
 
-  // Per-account column → key (0-indexed within row array)
-  var ACCOUNTS = [
-    { key: "tmb",         col: CF_COL_TMB - 1 },
-    { key: "iobCa",       col: CF_COL_IOB_CA - 1 },
-    { key: "cashbookApp", col: CF_COL_CASHBOOK - 1 },
-    { key: "cash",        col: CF_COL_CASH - 1 },
-    { key: "iobCc",       col: CF_COL_IOB_CC - 1 }
+  // Each account contributes one or two columns in the row.
+  // Inflow/outflow are kept as separate sources so we can sign them correctly.
+  // For CC, withdrawals (M) bring cash into operations → IN; repayment (N) and interest (O) are OUT.
+  var SOURCES = [
+    { key: "tmb",         col: CF_COL_TMB_CREDIT - 1,      sign:  1, kind: "credit" },
+    { key: "tmb",         col: CF_COL_TMB_DEBIT - 1,       sign: -1, kind: "debit"  },
+    { key: "iobCa",       col: CF_COL_IOB_CA_CREDIT - 1,   sign:  1, kind: "credit" },
+    { key: "iobCa",       col: CF_COL_IOB_CA_DEBIT - 1,    sign: -1, kind: "debit"  },
+    { key: "cashbookApp", col: CF_COL_CASHBOOK_CREDIT - 1, sign:  1, kind: "credit" },
+    { key: "cashbookApp", col: CF_COL_CASHBOOK_DEBIT - 1,  sign: -1, kind: "debit"  },
+    { key: "cash",        col: CF_COL_CASH_CREDIT - 1,     sign:  1, kind: "credit" },
+    { key: "cash",        col: CF_COL_CASH_DEBIT - 1,      sign: -1, kind: "debit"  },
+    { key: "iobCc",       col: CF_COL_IOB_CC_DRAWN - 1,    sign:  1, kind: "withdraw" },
+    { key: "iobCc",       col: CF_COL_IOB_CC_REPAY - 1,    sign: -1, kind: "repay"  },
+    { key: "iobCc",       col: CF_COL_IOB_CC_INTEREST - 1, sign: -1, kind: "interest" }
   ];
 
   var out = [];
@@ -662,23 +685,31 @@ function _readCashLedger(fromYmd, toYmd, accountKey, direction) {
     if (t < fromMs || t > toMs) continue;
 
     var desc = String(r[CF_LEDGER_DESC_COL - 1] || "").trim();
+    var typeRaw = String(r[CF_LEDGER_TYPE_COL - 1] || "").trim();
+    var typeNorm = typeRaw.toLowerCase();
+    var isInternal = typeNorm.indexOf("internal") >= 0;
     var cat  = String(r[CF_LEDGER_CAT_COL - 1] || "").trim();
 
-    for (var a = 0; a < ACCOUNTS.length; a++) {
-      var amtRaw = r[ACCOUNTS[a].col];
+    for (var a = 0; a < SOURCES.length; a++) {
+      var src = SOURCES[a];
+      var amtRaw = r[src.col];
       if (amtRaw === "" || amtRaw === null || amtRaw === undefined) continue;
-      var amt = Number(amtRaw);
-      if (!amt || isNaN(amt)) continue;
+      var mag = Math.abs(Number(amtRaw));
+      if (!mag || isNaN(mag)) continue;
+      var amt = mag * src.sign;
 
-      if (accountKey && accountKey !== ACCOUNTS[a].key) continue;
-      if (direction === "in"  && amt <= 0) continue;
-      if (direction === "out" && amt >= 0) continue;
+      if (accountKey && accountKey !== src.key) continue;
+      if (direction === "in")  { if (amt <= 0 || isInternal) continue; }
+      if (direction === "out") { if (amt >= 0 || isInternal) continue; }
 
       var entry = {
         date: _ymd(d),
         description: desc,
-        account: ACCOUNTS[a].key,
-        amount: amt
+        account: src.key,
+        amount: amt,
+        kind: src.kind,
+        type: typeRaw,
+        internal: isInternal
       };
       if (cat) entry.category = cat;
       out.push(entry);
