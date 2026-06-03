@@ -44,12 +44,11 @@ var CF_COL_CASH       = 11;  // K  (sheet header says "Petty Cash" — physical 
 var CF_COL_IOB_CC     = 13;  // M
 var CF_IOB_CC_LIMIT   = 2000000;
 
-// Monthly summary cells — adjust if your Master Control sheet layout differs.
-var CF_CELL_OP_INFLOW   = "E6";
-var CF_CELL_OP_OUTFLOW  = "F6";
-var CF_CELL_OP_NET      = "G6";
-var CF_CELL_CC_DRAWN    = "M6";
-var CF_CELL_AS_OF_DATE  = "B4";
+// Monthly summary cells (per Master Control sheet layout).
+var CF_CELL_OP_INFLOW   = "R3";   // Operating Inflow (positive)
+var CF_CELL_OP_OUTFLOW  = "S3";   // Operating outflow (stored positive; we negate)
+var CF_CELL_OP_NET      = "T3";   // Net Operating Cashflow (signed)
+var CF_CELL_AS_OF_DATE  = "";     // not used — "as of" derived from last ledger entry
 
 // Ledger data rows (row 15 onwards), columns A..O.
 var CF_LEDGER_START_ROW = 15;
@@ -571,13 +570,31 @@ function _readCashflow() {
   var opOutflowVal  = Number(sh.getRange(CF_CELL_OP_OUTFLOW).getValue()) || 0;
   var opOutflow     = opOutflowVal > 0 ? -opOutflowVal : opOutflowVal; // ensure negative
   var opCashflowNet = Number(sh.getRange(CF_CELL_OP_NET).getValue());
-  if (!isFinite(opCashflowNet) || opCashflowNet === 0) opCashflowNet = opInflow + opOutflow;
-  var ccDrawn       = Math.abs(Number(sh.getRange(CF_CELL_CC_DRAWN).getValue()) || 0);
+  if (!isFinite(opCashflowNet)) opCashflowNet = opInflow + opOutflow;
 
-  // As-of date (best effort) + last entry date scanned from ledger
-  var asOfRaw = sh.getRange(CF_CELL_AS_OF_DATE).getValue();
-  var asOfDate = _ymd(_toDate(asOfRaw)) || _ymd(new Date());
+  // CC drawn this month = sum of column M (Cash Credit withdrawal) from row 15 onwards,
+  // filtered to entries dated within the current calendar month.
+  var ccDrawn = 0;
+  var lastRow = sh.getLastRow();
+  if (lastRow >= CF_LEDGER_START_ROW) {
+    var n = lastRow - CF_LEDGER_START_ROW + 1;
+    var ledgerDates = sh.getRange(CF_LEDGER_START_ROW, CF_LEDGER_DATE_COL, n, 1).getValues();
+    var ledgerCc    = sh.getRange(CF_LEDGER_START_ROW, CF_COL_IOB_CC, n, 1).getValues();
+    var nowD = new Date();
+    var curY = nowD.getFullYear();
+    var curM = nowD.getMonth();
+    for (var k = 0; k < n; k++) {
+      var dRow = _toDate(ledgerDates[k][0]);
+      if (!dRow) continue;
+      if (dRow.getFullYear() !== curY || dRow.getMonth() !== curM) continue;
+      var v = Number(ledgerCc[k][0]);
+      if (!v || isNaN(v)) continue;
+      // Withdrawal entries appear as negative numbers in the ledger; CC drawn is the absolute outflow.
+      if (v < 0) ccDrawn += -v;
+    }
+  }
 
+  // As-of date — use the most recent ledger entry; fall back to today.
   var lastEntry = "";
   var last = sh.getLastRow();
   if (last >= CF_LEDGER_START_ROW) {
@@ -589,7 +606,8 @@ function _readCashflow() {
     }
     if (maxMs) lastEntry = _ymd(new Date(maxMs));
   }
-  if (!lastEntry) lastEntry = asOfDate;
+  if (!lastEntry) lastEntry = _ymd(new Date());
+  var asOfDate = lastEntry;
 
   var monthLabel = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "MMM yyyy");
 
