@@ -158,16 +158,25 @@ export function PartnerDay() {
       ) : looms.length === 0 ? (
         <EmptyState date={date} inProgress={inProgress} />
       ) : (
-        <ul className="divide-y divide-[var(--color-border-hairline)]">
-          {looms.map((l) => (
-            <LoomRow
-              key={l.loom}
-              data={l}
-              open={expanded === l.loom}
-              onToggle={() => setExpanded(expanded === l.loom ? null : l.loom)}
+        <>
+          {summary.loomsReporting < summary.loomsTotal && (
+            <PartialBanner
+              missing={summary.loomsTotal - summary.loomsReporting}
+              total={summary.loomsTotal}
+              inProgress={inProgress}
             />
-          ))}
-        </ul>
+          )}
+          <ul className="divide-y divide-[var(--color-border-hairline)]">
+            {looms.map((l) => (
+              <LoomRow
+                key={l.loom}
+                data={l}
+                open={expanded === l.loom}
+                onToggle={() => setExpanded(expanded === l.loom ? null : l.loom)}
+              />
+            ))}
+          </ul>
+        </>
       )}
     </div>
   );
@@ -353,6 +362,28 @@ function Item({ k, v, primary, subtle }: { k: string; v: string; primary?: boole
     <div className="flex justify-between gap-2">
       <dt className="text-[var(--color-text-secondary)]">{k}</dt>
       <dd className={vCls}>{v}</dd>
+    </div>
+  );
+}
+
+function PartialBanner({ missing, total, inProgress }: { missing: number; total: number; inProgress: boolean }) {
+  const reported = total - missing;
+  const bg = inProgress
+    ? "bg-[color-mix(in_srgb,var(--color-status-amber)_10%,white)] border-[color-mix(in_srgb,var(--color-status-amber)_30%,transparent)]"
+    : "bg-[color-mix(in_srgb,var(--color-status-red)_10%,white)] border-[color-mix(in_srgb,var(--color-status-red)_30%,transparent)]";
+  const fg = inProgress ? "text-[var(--color-status-amber)]" : "text-[var(--color-status-red)]";
+  const dot = inProgress ? "bg-[var(--color-status-amber)]" : "bg-[var(--color-status-red)]";
+  return (
+    <div className={`mb-3 rounded-lg border ${bg} px-3.5 py-2.5 flex items-start gap-2.5`}>
+      <span className={`mt-1.5 inline-block w-1.5 h-1.5 rounded-full ${dot} animate-pulse shrink-0`} />
+      <div className="flex-1 min-w-0">
+        <p className={`text-[12px] font-semibold ${fg} uppercase tracking-wide`}>
+          {inProgress ? "பதிவு நிலுவையில்" : "பதிவு முழுமையடையவில்லை"}
+        </p>
+        <p className="text-[14px] text-[var(--color-text-primary)] mt-0.5 leading-snug">
+          {reported}/{total} தறிகள் பதிவாகியுள்ளன · {missing} இன்னும் {inProgress ? "எதிர்பார்க்கப்படுகிறது" : "பதிவாகவில்லை"}.
+        </p>
+      </div>
     </div>
   );
 }
