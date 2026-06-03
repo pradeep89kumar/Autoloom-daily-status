@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate } from "react-router";
-import { Calendar, TrendingUp, Wallet, ArrowLeft } from "lucide-react";
+import { Calendar, TrendingUp, Wallet, IndianRupee, ArrowLeft } from "lucide-react";
 import { setRole } from "../../lib/persona";
 
 export function PartnerShell() {
@@ -27,8 +27,9 @@ export function PartnerShell() {
         <Outlet />
       </main>
 
-      <nav className="h-16 bg-white border-t border-[var(--color-border-hairline)] grid grid-cols-3 shrink-0">
+      <nav className="h-16 bg-white border-t border-[var(--color-border-hairline)] grid grid-cols-4 shrink-0">
         <TabLink to="/partner/day" label="Day" Icon={Calendar} />
+        <TabLink to="/partner/cash" label="Cash" Icon={IndianRupee} />
         <TabLink to="/partner/trend" label="Trend" Icon={TrendingUp} />
         <TabLink to="/partner/receivables" label="Receivables" Icon={Wallet} />
       </nav>

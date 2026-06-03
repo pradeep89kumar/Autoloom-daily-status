@@ -11,6 +11,8 @@ import { Logs } from "./pages/supervisor/Logs";
 import { PinGate } from "./pages/partner/PinGate";
 import { PartnerShell } from "./pages/partner/PartnerShell";
 import { PartnerDay } from "./pages/partner/Day";
+import { PartnerCash } from "./pages/partner/Cash";
+import { PartnerCashStatement } from "./pages/partner/CashStatement";
 import { PartnerTrend } from "./pages/partner/Trend";
 import { PartnerReceivables } from "./pages/partner/Receivables";
 import { PartnerGuard } from "./pages/partner/PartnerGuard";
@@ -49,10 +51,12 @@ export const router = createBrowserRouter([
         children: [
           { index: true, Component: PartnerDay },
           { path: "day", Component: PartnerDay },
+          { path: "cash", Component: PartnerCash },
           { path: "trend", Component: PartnerTrend },
           { path: "receivables", Component: PartnerReceivables },
         ],
       },
+      { path: "cash/statement", Component: PartnerCashStatement },
     ],
   },
 ]);

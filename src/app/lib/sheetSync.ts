@@ -328,3 +328,73 @@ export async function fetchMasterReceivables(): Promise<ReceivableRow[]> {
     return [];
   }
 }
+
+export type CashAccount = "tmb" | "iobCa" | "cashbookApp" | "cash" | "iobCc";
+
+export interface CashflowData {
+  asOfDate: string;       // ISO YYYY-MM-DD or display string from sheet
+  lastEntryDate: string;  // ISO YYYY-MM-DD
+  monthLabel: string;     // e.g. "Jun 2026"
+  balances: {
+    tmb: number;
+    iobCa: number;
+    cashbookApp: number;
+    cash: number;
+    iobCcUsed: number;
+    iobCcLimit: number;
+    iobCcAvailable: number;
+  };
+  totalAvailable: number;
+  month: {
+    opInflow: number;
+    opOutflow: number;       // negative number
+    opCashflowNet: number;
+    ccDrawnThisMonth: number;
+  };
+}
+
+export async function fetchCashflow(): Promise<CashflowData | null> {
+  if (!ENDPOINT) return null;
+  try {
+    const res = await fetch(`${ENDPOINT}?mode=cashflow`, { method: "GET" });
+    const data = await res.json();
+    if (!data?.ok || !data.cashflow) return null;
+    return data.cashflow as CashflowData;
+  } catch (e) {
+    console.warn("[sheetSync] fetchCashflow failed", e);
+    return null;
+  }
+}
+
+export interface CashLedgerEntry {
+  date: string;          // ISO YYYY-MM-DD
+  description: string;
+  account: CashAccount;
+  category?: string;
+  amount: number;        // signed: positive inflow, negative outflow
+}
+
+export interface CashLedgerFilter {
+  from?: string;         // ISO
+  to?: string;           // ISO
+  account?: CashAccount; // omit for all
+  direction?: "in" | "out";
+}
+
+export async function fetchCashLedger(f: CashLedgerFilter = {}): Promise<CashLedgerEntry[]> {
+  if (!ENDPOINT) return [];
+  const params = new URLSearchParams({ mode: "cashflow-ledger" });
+  if (f.from) params.set("from", f.from);
+  if (f.to) params.set("to", f.to);
+  if (f.account) params.set("account", f.account);
+  if (f.direction) params.set("direction", f.direction);
+  try {
+    const res = await fetch(`${ENDPOINT}?${params.toString()}`, { method: "GET" });
+    const data = await res.json();
+    if (!data?.ok || !Array.isArray(data.rows)) return [];
+    return data.rows as CashLedgerEntry[];
+  } catch (e) {
+    console.warn("[sheetSync] fetchCashLedger failed", e);
+    return [];
+  }
+}
