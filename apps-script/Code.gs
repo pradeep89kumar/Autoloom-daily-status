@@ -15,6 +15,9 @@
  *  GET  ?mode=master-day&date=YYYY-MM-DD       → master Looms_Production rows for one day
  *  GET  ?mode=master-range&from=YYYY-MM-DD&to=YYYY-MM-DD → light per-loom-per-day aggregates
  *  GET  ?mode=master-orders                    → master Order tab rows
+ *  GET  ?mode=master-receivables               → master Paagu ID receivables view
+ *  GET  ?mode=cashflow                         → cash position + monthly summary from Master Control tab
+ *  GET  ?mode=cashflow-ledger&from=&to=&account=&direction= → ledger entries for the statement view
  *  POST kind:"edit"           → overwrite Sheet1 row by rowIndex, only inside edit window
  */
 
@@ -30,6 +33,30 @@ var MASTER_SHEET_ID = "1WbsCT_pgF9tk5XgIWQSabH7D_ZWt7bqHks_-c7BcQBo";
 var MASTER_PRODUCTION_TAB = "Looms_Production";
 var MASTER_ORDER_TAB = "Order";
 var MASTER_PAAGU_TAB = "Paagu ID";
+var MASTER_CASHFLOW_TAB = "Master Control";   // ← confirm exact tab name
+
+// Closing balance row (Bank Statement Closing) + per-account columns (1-indexed).
+var CF_ROW_CLOSING = 10;
+var CF_COL_TMB        = 5;   // E
+var CF_COL_IOB_CA     = 7;   // G
+var CF_COL_CASHBOOK   = 9;   // I  (sheet header says "Cash" — functionally Cashbook App)
+var CF_COL_CASH       = 11;  // K  (sheet header says "Petty Cash" — physical wallet cash)
+var CF_COL_IOB_CC     = 13;  // M
+var CF_IOB_CC_LIMIT   = 2000000;
+
+// Monthly summary cells — adjust if your Master Control sheet layout differs.
+var CF_CELL_OP_INFLOW   = "E6";
+var CF_CELL_OP_OUTFLOW  = "F6";
+var CF_CELL_OP_NET      = "G6";
+var CF_CELL_CC_DRAWN    = "M6";
+var CF_CELL_AS_OF_DATE  = "B4";
+
+// Ledger data rows (row 15 onwards), columns A..O.
+var CF_LEDGER_START_ROW = 15;
+var CF_LEDGER_WIDTH     = 15;     // A..O
+var CF_LEDGER_DATE_COL  = 1;      // A
+var CF_LEDGER_DESC_COL  = 2;      // B
+var CF_LEDGER_CAT_COL   = 3;      // C
 
 // WhatsApp manual relay — single number that forwards to the partner group.
 // Leave WA_ENABLED=false until Twilio creds are added; messages are no-ops.
@@ -102,6 +129,16 @@ function doGet(e) {
   }
   if (mode === "master-receivables") {
     return _json({ ok: true, rows: _readMasterReceivables() });
+  }
+  if (mode === "cashflow") {
+    return _json({ ok: true, cashflow: _readCashflow() });
+  }
+  if (mode === "cashflow-ledger") {
+    var cfFrom = (e.parameter && e.parameter.from) || "";
+    var cfTo   = (e.parameter && e.parameter.to)   || _ymd(new Date());
+    var cfAcct = (e.parameter && e.parameter.account)   || "";
+    var cfDir  = (e.parameter && e.parameter.direction) || "";
+    return _json({ ok: true, rows: _readCashLedger(cfFrom, cfTo, cfAcct, cfDir) });
   }
   return _json({ ok: true, rows: _readLightRows(21) });
 }
@@ -507,6 +544,131 @@ function _normEff(v) {
 function _ymdToDate(s) {
   var p = String(s).split("-");
   return new Date(+p[0], +p[1] - 1, +p[2]);
+}
+
+/* ------------------------------ master workbook · cashflow ------------------------------ */
+
+function _cashflowSheet() {
+  return SpreadsheetApp.openById(MASTER_SHEET_ID).getSheetByName(MASTER_CASHFLOW_TAB);
+}
+
+function _readCashflow() {
+  var sh = _cashflowSheet();
+  if (!sh) return null;
+
+  // Closing balances (row 10)
+  var tmb         = Number(sh.getRange(CF_ROW_CLOSING, CF_COL_TMB).getValue())      || 0;
+  var iobCa       = Number(sh.getRange(CF_ROW_CLOSING, CF_COL_IOB_CA).getValue())   || 0;
+  var cashbookApp = Number(sh.getRange(CF_ROW_CLOSING, CF_COL_CASHBOOK).getValue()) || 0;
+  var cash        = Number(sh.getRange(CF_ROW_CLOSING, CF_COL_CASH).getValue())     || 0;
+  var iobCcRaw    = Number(sh.getRange(CF_ROW_CLOSING, CF_COL_IOB_CC).getValue())   || 0;
+  var iobCcUsed   = Math.abs(iobCcRaw);
+  var iobCcAvailable = Math.max(0, CF_IOB_CC_LIMIT - iobCcUsed);
+  var totalAvailable = tmb + iobCa + cashbookApp + cash + iobCcAvailable;
+
+  // Monthly summary cells
+  var opInflow      = Number(sh.getRange(CF_CELL_OP_INFLOW).getValue())  || 0;
+  var opOutflowVal  = Number(sh.getRange(CF_CELL_OP_OUTFLOW).getValue()) || 0;
+  var opOutflow     = opOutflowVal > 0 ? -opOutflowVal : opOutflowVal; // ensure negative
+  var opCashflowNet = Number(sh.getRange(CF_CELL_OP_NET).getValue());
+  if (!isFinite(opCashflowNet) || opCashflowNet === 0) opCashflowNet = opInflow + opOutflow;
+  var ccDrawn       = Math.abs(Number(sh.getRange(CF_CELL_CC_DRAWN).getValue()) || 0);
+
+  // As-of date (best effort) + last entry date scanned from ledger
+  var asOfRaw = sh.getRange(CF_CELL_AS_OF_DATE).getValue();
+  var asOfDate = _ymd(_toDate(asOfRaw)) || _ymd(new Date());
+
+  var lastEntry = "";
+  var last = sh.getLastRow();
+  if (last >= CF_LEDGER_START_ROW) {
+    var dates = sh.getRange(CF_LEDGER_START_ROW, CF_LEDGER_DATE_COL, last - CF_LEDGER_START_ROW + 1, 1).getValues();
+    var maxMs = 0;
+    for (var i = 0; i < dates.length; i++) {
+      var d = _toDate(dates[i][0]);
+      if (d && d.getTime() > maxMs) maxMs = d.getTime();
+    }
+    if (maxMs) lastEntry = _ymd(new Date(maxMs));
+  }
+  if (!lastEntry) lastEntry = asOfDate;
+
+  var monthLabel = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "MMM yyyy");
+
+  return {
+    asOfDate: asOfDate,
+    lastEntryDate: lastEntry,
+    monthLabel: monthLabel,
+    balances: {
+      tmb: tmb,
+      iobCa: iobCa,
+      cashbookApp: cashbookApp,
+      cash: cash,
+      iobCcUsed: iobCcUsed,
+      iobCcLimit: CF_IOB_CC_LIMIT,
+      iobCcAvailable: iobCcAvailable
+    },
+    totalAvailable: totalAvailable,
+    month: {
+      opInflow: opInflow,
+      opOutflow: opOutflow,
+      opCashflowNet: opCashflowNet,
+      ccDrawnThisMonth: ccDrawn
+    }
+  };
+}
+
+function _readCashLedger(fromYmd, toYmd, accountKey, direction) {
+  var sh = _cashflowSheet();
+  if (!sh) return [];
+  var last = sh.getLastRow();
+  if (last < CF_LEDGER_START_ROW) return [];
+
+  var values = sh.getRange(CF_LEDGER_START_ROW, 1, last - CF_LEDGER_START_ROW + 1, CF_LEDGER_WIDTH).getValues();
+  var fromMs = fromYmd ? _ymdToDate(fromYmd).getTime() : 0;
+  var toMs   = toYmd   ? _ymdToDate(toYmd).getTime() + 86399000 : Date.now();
+
+  // Per-account column → key (0-indexed within row array)
+  var ACCOUNTS = [
+    { key: "tmb",         col: CF_COL_TMB - 1 },
+    { key: "iobCa",       col: CF_COL_IOB_CA - 1 },
+    { key: "cashbookApp", col: CF_COL_CASHBOOK - 1 },
+    { key: "cash",        col: CF_COL_CASH - 1 },
+    { key: "iobCc",       col: CF_COL_IOB_CC - 1 }
+  ];
+
+  var out = [];
+  for (var i = 0; i < values.length; i++) {
+    var r = values[i];
+    var d = _toDate(r[CF_LEDGER_DATE_COL - 1]);
+    if (!d) continue;
+    var t = d.getTime();
+    if (t < fromMs || t > toMs) continue;
+
+    var desc = String(r[CF_LEDGER_DESC_COL - 1] || "").trim();
+    var cat  = String(r[CF_LEDGER_CAT_COL - 1] || "").trim();
+
+    for (var a = 0; a < ACCOUNTS.length; a++) {
+      var amtRaw = r[ACCOUNTS[a].col];
+      if (amtRaw === "" || amtRaw === null || amtRaw === undefined) continue;
+      var amt = Number(amtRaw);
+      if (!amt || isNaN(amt)) continue;
+
+      if (accountKey && accountKey !== ACCOUNTS[a].key) continue;
+      if (direction === "in"  && amt <= 0) continue;
+      if (direction === "out" && amt >= 0) continue;
+
+      var entry = {
+        date: _ymd(d),
+        description: desc,
+        account: ACCOUNTS[a].key,
+        amount: amt
+      };
+      if (cat) entry.category = cat;
+      out.push(entry);
+    }
+  }
+
+  out.sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; });
+  return out;
 }
 
 /* ------------------------------ helpers ------------------------------ */
