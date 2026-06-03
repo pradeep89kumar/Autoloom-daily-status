@@ -21,7 +21,7 @@
  *  POST kind:"edit"           → overwrite Sheet1 row by rowIndex, only inside edit window
  */
 
-var SHEET_ID = "PASTE_YOUR_SHEET_ID_HERE";
+var SHEET_ID = "1EJ_5mWO5QEY-6gpWfv2nsG778BrFUw9xv3J0d0NH-1A";
 var SHEET_NAME = "Sheet1";
 var LOADINGS_SHEET = "Loadings";
 var ORDERS_SHEET = "Sheet3";
