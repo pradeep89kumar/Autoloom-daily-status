@@ -84,11 +84,7 @@ export function RoleSelector() {
         </div>
       )}
 
-      <footer className="mt-auto pt-10 text-center">
-        <p className="text-[12px] text-[var(--color-text-secondary)]">
-          Power Loom QC
-        </p>
-      </footer>
+      <footer className="mt-auto pt-10" />
     </div>
   );
 }

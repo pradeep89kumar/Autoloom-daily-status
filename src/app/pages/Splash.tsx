@@ -1,62 +1,52 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 
-type Quote = {
-  ta: string;
-  translit: string;
-  en: string;
-  by: string;
-};
+type Quote = { ta: string; by: string };
 
 const QUOTES: Quote[] = [
-  {
-    ta: "யாதும் ஊரே, யாவரும் கேளிர்",
-    translit: "Yaadhum oorae, yaavarum kelir",
-    en: "Every town is ours, everyone is kin.",
-    by: "Kaniyan Pungundranar",
-  },
-  {
-    ta: "உழுதுண்டு வாழ்வாரே வாழ்வார்",
-    translit: "Uzhudhundu vaazhvaarae vaazhvaar",
-    en: "Those who live by their own labour, truly live.",
-    by: "Thiruvalluvar",
-  },
-  {
-    ta: "செயற்கரிய செய்வார் பெரியர்",
-    translit: "Seyatkariya seyvaar periyar",
-    en: "The great are those who do the difficult.",
-    by: "Thiruvalluvar",
-  },
-  {
-    ta: "கற்றது கைமண் அளவு, கல்லாதது உலகளவு",
-    translit: "Katradhu kaiman alavu, kallaadhadhu ulagalavu",
-    en: "What we have learnt is a handful; what we haven't is the world.",
-    by: "Avvaiyar",
-  },
-  {
-    ta: "நிற்க அதற்குத் தக",
-    translit: "Nirka adharkuth thaga",
-    en: "Stand worthy of what you stand for.",
-    by: "Avvaiyar",
-  },
-  {
-    ta: "வெல்லும் சொல் இனிய சொல்",
-    translit: "Vellum sol iniya sol",
-    en: "The winning word is the kind word.",
-    by: "Thiruvalluvar",
-  },
-  {
-    ta: "முயற்சி திருவினை ஆக்கும்",
-    translit: "Muyarchi thiruvinai aakkum",
-    en: "Steady effort turns toil into fortune.",
-    by: "Thiruvalluvar",
-  },
-  {
-    ta: "காலம் செய்யும் கைம்மாறு",
-    translit: "Kaalam seyyum kaimmaaru",
-    en: "Time itself returns the favour.",
-    by: "Tamil proverb",
-  },
+  // Thirumoolar — Thirumandiram
+  { ta: "அன்பும் சிவமும் இரண்டென்பர் அறிவிலார்", by: "திருமூலர்" },
+  { ta: "ஒன்றே குலம், ஒருவனே தேவன்", by: "திருமூலர்" },
+  { ta: "உள்ளம் பெருங்கோயில் ஊனுடம்பு ஆலயம்", by: "திருமூலர்" },
+  { ta: "நாடும் பொருளும் நலமும் அவையெல்லாம் தேடும் தனக்கொரு தெய்வம் அவன்காண்", by: "திருமூலர்" },
+
+  // Avvaiyar — Aathichudi & Konrai Vendhan
+  { ta: "அறம் செய விரும்பு", by: "ஔவையார்" },
+  { ta: "ஆறுவது சினம்", by: "ஔவையார்" },
+  { ta: "இயல்வது கரவேல்", by: "ஔவையார்" },
+  { ta: "ஈவது விலக்கேல்", by: "ஔவையார்" },
+  { ta: "உடையது விளம்பேல்", by: "ஔவையார்" },
+  { ta: "கற்றது கைம்மண் அளவு, கல்லாதது உலகளவு", by: "ஔவையார்" },
+  { ta: "நிற்க அதற்குத் தக", by: "ஔவையார்" },
+
+  // Thiruvalluvar — Thirukkural
+  { ta: "முயற்சி திருவினை ஆக்கும்; முயற்றின்மை இன்மை புகுத்தி விடும்", by: "திருவள்ளுவர்" },
+  { ta: "ஊக்கம் உடையான் ஒடுக்கம் பொருத்தக்கால் தாக்கி வீழும் தலை", by: "திருவள்ளுவர்" },
+  { ta: "எண்ணிய எண்ணியாங்கு எய்துப", by: "திருவள்ளுவர்" },
+  { ta: "தோன்றிற் புகழொடு தோன்றுக; அஃதிலார் தோன்றலின் தோன்றாமை நன்று", by: "திருவள்ளுவர்" },
+  { ta: "உழுதுண்டு வாழ்வாரே வாழ்வார்; மற்றெல்லாம் தொழுதுண்டு பின் செல்பவர்", by: "திருவள்ளுவர்" },
+  { ta: "செயற்கரிய செய்வார் பெரியர்; சிறியர் செயற்கரிய செய்கலாதார்", by: "திருவள்ளுவர்" },
+  { ta: "கற்க கசடறக் கற்பவை; கற்றபின் நிற்க அதற்குத் தக", by: "திருவள்ளுவர்" },
+  { ta: "இன்னா செய்தாரை ஒறுத்தல் அவர் நாண நன்னயம் செய்து விடல்", by: "திருவள்ளுவர்" },
+  { ta: "வெள்ளத்து அனைய மலர் நீட்டம், மாந்தர்தம் உள்ளத்து அனையது உயர்வு", by: "திருவள்ளுவர்" },
+
+  // Sangam — Purananuru
+  { ta: "யாதும் ஊரே, யாவரும் கேளிர்", by: "கணியன் பூங்குன்றனார்" },
+  { ta: "தீதும் நன்றும் பிறர் தர வாரா", by: "கணியன் பூங்குன்றனார்" },
+
+  // Naladiyar
+  { ta: "மழித்தலும் நீட்டலும் வேண்டா; உலகம் பழித்தது ஒழித்து விடின்", by: "நாலடியார்" },
+
+  // Pattinathar
+  { ta: "கற்பகத் தருநிழல் கைவிட்டு வாழ்வது, விற்பனை செய்யும் வீண்வாழ்வே", by: "பட்டினத்தார்" },
+
+  // Bharathiyar
+  { ta: "தனி ஒருவனுக்கு உணவில்லை எனில் ஜகத்தினை அழித்திடுவோம்", by: "பாரதியார்" },
+  { ta: "காக்கைக் குருவி எங்கள் ஜாதி, நீள் கடலும் மலையும் எங்கள் கூட்டம்", by: "பாரதியார்" },
+  { ta: "அச்சமில்லை அச்சமில்லை அச்சமென்பதில்லையே", by: "பாரதியார்" },
+
+  // Bharathidasan
+  { ta: "உழைப்பவர்க்கே சோறு, உழையாதவர்க்கு இல்லை", by: "பாரதிதாசன்" },
 ];
 
 const AUTO_DISMISS_MS = 2800;
@@ -126,13 +116,7 @@ export function Splash() {
         <p className="text-[22px] leading-snug font-semibold text-[var(--color-text-primary)]">
           {quote.ta}
         </p>
-        <p className="mt-2 text-[13px] italic text-[var(--color-text-secondary)]">
-          {quote.translit}
-        </p>
-        <p className="mt-3 text-[15px] leading-relaxed text-[var(--color-text-primary)]">
-          &ldquo;{quote.en}&rdquo;
-        </p>
-        <p className="mt-2 text-[12px] uppercase tracking-wide text-[var(--color-text-secondary)]">
+        <p className="mt-3 text-[12px] uppercase tracking-wide text-[var(--color-text-secondary)]">
           — {quote.by}
         </p>
         <div

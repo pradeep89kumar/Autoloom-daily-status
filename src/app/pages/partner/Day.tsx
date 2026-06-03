@@ -98,7 +98,14 @@ export function PartnerDay() {
         >
           <ChevronLeft className="w-5 h-5" strokeWidth={1.5} />
         </button>
-        <div className="flex flex-col items-center">
+        <label className="relative inline-flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-black/[0.03] cursor-pointer">
+          <span className="text-[14px] text-[var(--color-text-secondary)] leading-none">
+            {dateLabel(date)}
+          </span>
+          <span className="text-[16px] font-semibold text-[var(--color-text-primary)] tabular-nums leading-none">
+            {shortDateLong(date)}
+          </span>
+          <ChevronDown className="w-4 h-4 text-[var(--color-text-secondary)]" strokeWidth={1.75} />
           <input
             type="date"
             value={ymd(date)}
@@ -106,11 +113,10 @@ export function PartnerDay() {
             onChange={(e) => {
               if (e.target.value) setDate(fromYmd(e.target.value));
             }}
-            className="text-base font-semibold bg-transparent border-0 text-center cursor-pointer"
+            className="absolute inset-0 opacity-0 cursor-pointer"
             aria-label="Pick date"
           />
-          <span className="text-[14px] text-[var(--color-text-secondary)]">{dateLabel(date)}</span>
-        </div>
+        </label>
         <button
           onClick={() => step(1)}
           disabled={isToday || isFuture}
@@ -126,9 +132,11 @@ export function PartnerDay() {
         <SkeletonHeader />
       ) : (
         <>
-          <p className="text-[16px] leading-relaxed text-[var(--color-text-primary)] mb-5">
-            {dayBrief(date, summary, inProgress)}
-          </p>
+          <div className="rounded-xl bg-white border border-[var(--color-border-hairline)] shadow-[0_2px_8px_rgba(0,0,0,0.06)] px-4 py-3.5 mb-5">
+            <p className="text-[16px] leading-relaxed text-[var(--color-text-primary)]">
+              {dayBrief(date, summary, inProgress)}
+            </p>
+          </div>
 
           {summary.shiftsLogged > 0 && (
             <div className="grid grid-cols-3 gap-3 mb-6 pb-5 border-b border-[var(--color-border-hairline)]">
@@ -198,6 +206,28 @@ function Stat({ label, value, sub, primary, subtle }: { label: string; value: st
   );
 }
 
+function RevenueValue({ value }: { value: number }) {
+  if (value > 0 && value < 2000) {
+    return (
+      <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[18px] font-bold tabular-nums bg-[color-mix(in_srgb,var(--color-status-red)_12%,white)] text-[var(--color-status-red)] animate-pulse">
+        {fmtRupees(value)}
+      </span>
+    );
+  }
+  if (value > 0 && value < 3000) {
+    return (
+      <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[18px] font-bold tabular-nums bg-[color-mix(in_srgb,var(--color-status-amber)_12%,white)] text-[var(--color-status-amber)]">
+        {fmtRupees(value)}
+      </span>
+    );
+  }
+  return (
+    <span className="text-[18px] font-bold tabular-nums text-[var(--color-text-primary)]">
+      {fmtRupees(value)}
+    </span>
+  );
+}
+
 function bandClass(eff: number): string {
   const b = efficiencyBand(eff);
   if (b === "high") return "text-[var(--color-status-green)]";
@@ -244,7 +274,7 @@ function LoomRow({
             </div>
           )}
           <div className="flex items-baseline gap-2">
-            <span className="text-[18px] font-bold tabular-nums text-[var(--color-text-primary)]">{fmtRupees(data.revenue)}</span>
+            <RevenueValue value={data.revenue} />
             <span className="text-[14px] text-[var(--color-text-secondary)] tabular-nums">{fmtMeters(data.meters)}</span>
           </div>
           {meta && (
