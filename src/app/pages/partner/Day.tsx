@@ -359,12 +359,39 @@ function Item({ k, v, primary, subtle }: { k: string; v: string; primary?: boole
 
 function EmptyState({ date, inProgress }: { date: Date; inProgress: boolean }) {
   return (
-    <div className="py-10 text-center">
-      <p className="text-[15px] text-[var(--color-text-secondary)]">
-        {inProgress
-          ? "தரவு இல்லை — இன்றைய பதிவுகள் இன்னும் வரவில்லை."
-          : `தரவு இல்லை · ${shortDateLong(date)}`}
-      </p>
+    <div className="pt-10 pb-6 flex flex-col items-center text-center">
+      <img
+        src="/icon-512.png"
+        alt=""
+        aria-hidden
+        className="w-20 h-20 rounded-2xl opacity-30 grayscale mb-5 select-none"
+        draggable={false}
+      />
+      {inProgress ? (
+        <>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-[var(--color-status-amber)] mb-2">
+            பதிவு நிலுவையில்
+          </p>
+          <h3 className="text-[18px] font-semibold text-[var(--color-text-primary)] mb-1.5">
+            இன்னும் பதிவுகள் வரவில்லை
+          </h3>
+          <p className="text-[14px] leading-relaxed text-[var(--color-text-secondary)] max-w-[18rem]">
+            Shift A &amp; B முடிந்த பின் ஒவ்வொரு தறியின் பதிவு இங்கு தோன்றும்.
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-[var(--color-status-red)] mb-2">
+            பதிவு இல்லை
+          </p>
+          <h3 className="text-[18px] font-semibold text-[var(--color-text-primary)] mb-1.5">
+            இந்த நாளுக்கான பதிவுகள் இல்லை
+          </h3>
+          <p className="text-[14px] leading-relaxed text-[var(--color-text-secondary)] max-w-[18rem]">
+            {shortDateLong(date)} — சூப்பர்வைசர் இன்னும் பதிவு செய்யவில்லை.
+          </p>
+        </>
+      )}
     </div>
   );
 }
