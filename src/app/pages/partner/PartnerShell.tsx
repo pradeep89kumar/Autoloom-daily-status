@@ -53,13 +53,22 @@ function TabLink({
     <NavLink
       to={to}
       className={({ isActive }) =>
-        `flex flex-col items-center justify-center gap-1 text-xs ${
-          isActive ? "text-[var(--color-text-primary)] font-medium" : "text-[var(--color-text-secondary)]"
+        `relative flex flex-col items-center justify-center gap-1 text-xs ${
+          isActive
+            ? "text-[var(--color-text-primary)] font-semibold"
+            : "text-[var(--color-text-secondary)]/60"
         }`
       }
     >
-      <Icon className="w-5 h-5" strokeWidth={1.5} />
-      <span>{label}</span>
+      {({ isActive }) => (
+        <>
+          {isActive ? (
+            <span className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-[3px] rounded-b-full bg-[var(--color-text-primary)]" />
+          ) : null}
+          <Icon className="w-5 h-5" strokeWidth={isActive ? 2.25 : 1.5} />
+          <span>{label}</span>
+        </>
+      )}
     </NavLink>
   );
 }
