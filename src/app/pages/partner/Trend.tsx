@@ -314,12 +314,13 @@ export function PartnerTrend() {
             {LOOMS.map((loom) => {
               const t = totals.get(loom);
               const eff = t && t.target > 0 ? t.meters / t.target : 0;
-              const value =
-                metric === "meters"
-                  ? fmtMeters(t?.meters ?? 0)
-                  : metric === "revenue"
-                    ? fmtRupees(t?.revenue ?? 0)
-                    : fmtPercent(eff);
+              let activeDays = 0;
+              for (const d of dates) {
+                const c = grid.get(`${loom}|${ymd(d)}`);
+                if (c && c.meters > 0) activeDays++;
+              }
+              const avgRevenue = activeDays > 0 ? (t?.revenue ?? 0) / activeDays : 0;
+              const avgMeters = activeDays > 0 ? (t?.meters ?? 0) / activeDays : 0;
               return (
                 <li key={loom} className="py-3 flex items-center gap-3">
                   <span className="w-10 text-[16px] font-bold tabular-nums">{loom}</span>
@@ -329,7 +330,31 @@ export function PartnerTrend() {
                     </span>
                     {planByLoom.get(loom) ? <PlanBar plan={planByLoom.get(loom)!} /> : null}
                   </span>
-                  <span className="text-[18px] font-bold tabular-nums text-[var(--color-text-primary)]">{value}</span>
+                  <span className="text-right">
+                    {metric === "efficiency" ? (
+                      <span className="text-[18px] font-bold tabular-nums text-[var(--color-text-primary)]">
+                        {fmtPercent(eff)}
+                      </span>
+                    ) : metric === "revenue" ? (
+                      <>
+                        <span className="block text-[18px] font-bold tabular-nums text-[var(--color-text-primary)] leading-tight">
+                          {fmtRupees(avgRevenue)}
+                        </span>
+                        <span className="block text-[11px] text-[var(--color-text-secondary)]">
+                          / நாள் ({activeDays}d)
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="block text-[18px] font-bold tabular-nums text-[var(--color-text-primary)] leading-tight">
+                          {fmtMeters(avgMeters)}
+                        </span>
+                        <span className="block text-[11px] text-[var(--color-text-secondary)]">
+                          / நாள் ({activeDays}d)
+                        </span>
+                      </>
+                    )}
+                  </span>
                 </li>
               );
             })}
