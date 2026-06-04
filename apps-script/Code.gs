@@ -671,7 +671,7 @@ function _readCashLedger(fromYmd, toYmd, accountKey, direction) {
     { key: "cashbookApp", col: CF_COL_CASHBOOK_DEBIT - 1,  sign: -1, kind: "debit"  },
     { key: "cash",        col: CF_COL_CASH_CREDIT - 1,     sign:  1, kind: "credit" },
     { key: "cash",        col: CF_COL_CASH_DEBIT - 1,      sign: -1, kind: "debit"  },
-    { key: "iobCc",       col: CF_COL_IOB_CC_DRAWN - 1,    sign:  1, kind: "withdraw" },
+    { key: "iobCc",       col: CF_COL_IOB_CC_DRAWN - 1,    sign: -1, kind: "spend" },
     { key: "iobCc",       col: CF_COL_IOB_CC_REPAY - 1,    sign: -1, kind: "repay"  },
     { key: "iobCc",       col: CF_COL_IOB_CC_INTEREST - 1, sign: -1, kind: "interest" }
   ];

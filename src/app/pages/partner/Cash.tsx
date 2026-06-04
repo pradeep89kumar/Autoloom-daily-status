@@ -93,13 +93,13 @@ export function PartnerCash() {
           {/* Hero — total available */}
           <div className="rounded-xl bg-white border border-[var(--color-border-hairline)] shadow-[0_2px_8px_rgba(0,0,0,0.06)] px-4 py-5 mb-3">
             <p className="text-[12px] uppercase tracking-wide text-[var(--color-text-secondary)] mb-1">
-              Total available
+              Moththa available thogai
             </p>
             <p className="text-[32px] font-semibold text-[var(--color-text-primary)] tabular-nums leading-tight">
               {fmtINR(data.totalAvailable)}
             </p>
             <p className="text-[12px] text-[var(--color-text-secondary)] mt-1">
-              Across all accounts incl. CC headroom
+              Ella accounts · CC utpada
             </p>
           </div>
 
@@ -155,7 +155,7 @@ export function PartnerCash() {
             )}
 
             <div className="flex items-center justify-between py-2 border-t border-[var(--color-border-hairline)]">
-              <span className="text-[14px] text-[var(--color-text-primary)]">CC drawn this month</span>
+              <span className="text-[14px] text-[var(--color-text-primary)]">CC lrundhu edupattavai</span>
               <span className="text-[14px] font-medium tabular-nums text-[var(--color-text-primary)]">
                 {fmtINR(data.month.ccDrawnThisMonth)}
               </span>
