@@ -1,4 +1,5 @@
 import type { MasterRow, MasterRangeRow } from "./sheetSync";
+import { LOOM_CATALOG } from "./looms";
 
 export interface DaySummary {
   meters: number;
@@ -25,12 +26,12 @@ export function summarizeDay(rows: MasterRow[]): DaySummary {
     revenue,
     weightedEfficiency: target > 0 ? meters / target : 0,
     loomsReporting: loomSet.size,
-    loomsTotal: 8,
+    loomsTotal: LOOM_CATALOG.length,
     shiftsLogged: rows.length,
   };
 }
 
-const NUMBER_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"];
+const NUMBER_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen"];
 
 function numberWord(n: number): string {
   return n >= 0 && n < NUMBER_WORDS.length ? NUMBER_WORDS[n] : String(n);

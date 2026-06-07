@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchMasterRange, type MasterRangeRow } from "../../lib/sheetSync";
+import { LOOM_CATALOG } from "../../lib/looms";
 import {
   fmtMeters,
   fmtPercent,
@@ -17,7 +18,7 @@ import {
 type Metric = "efficiency" | "meters" | "revenue";
 
 const DAYS = 14;
-const LOOMS = ["L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8"];
+const LOOMS = LOOM_CATALOG.map((l) => l.name);
 
 function ymd(d: Date): string {
   const y = d.getFullYear();
