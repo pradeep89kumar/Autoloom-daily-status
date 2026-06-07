@@ -102,10 +102,16 @@ export function PartnerTrend() {
     const startedAt = Date.now();
     fetchMasterRange(from, to).then((r) => {
       if (!alive) return;
+      // Drop rows for newly added looms before their production-start date —
+      // they were copied forward by the master sheet automation but never
+      // physically ran. Otherwise their averages and heatmap would be skewed
+      // by zero-meter rows.
+      const NEW_LOOM_START_YMD = "2026-06-07";
+      const filtered = r.filter((row) => !(isNewLoom(row.loom) && row.date < NEW_LOOM_START_YMD));
       const wait = Math.max(0, 400 - (Date.now() - startedAt));
       setTimeout(() => {
         if (!alive) return;
-        setRows(r);
+        setRows(filtered);
         setLoading(false);
       }, wait);
     });
