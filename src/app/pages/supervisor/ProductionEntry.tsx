@@ -13,7 +13,8 @@ import {
   type LoomState,
 } from "../../lib/sheetSync";
 import { currentShift, fromYmd, shiftWindow, shortDate, ymd, type Shift } from "../../lib/shift";
-import { getLoom, LOOM_CATALOG } from "../../lib/looms";
+import { getLoom, LOOM_CATALOG, isNewLoom } from "../../lib/looms";
+import { NewPill } from "../../components/NewPill";
 import { addWeaver, getWeavers } from "../../lib/weavers";
 import { loadingStatusForTarget, mergeLoadings, type LoadingEvent } from "../../lib/loadings";
 
@@ -334,7 +335,10 @@ export function ProductionEntry() {
           </div>
         )}
         <div className="flex items-baseline gap-2 flex-wrap">
-          <h2 className="text-lg font-semibold">{loom.name}</h2>
+          <h2 className="text-lg font-semibold inline-flex items-baseline gap-1.5">
+            {loom.name}
+            {isNewLoom(loom.id) && <NewPill />}
+          </h2>
           <span className="text-sm text-[var(--color-text-secondary)] truncate">
             {effectiveDesign || <span className="italic">(not loaded)</span>}
           </span>
@@ -850,6 +854,7 @@ function NextLoomSheet({
               >
                 <span className="inline-flex items-center gap-1">
                   {l.name}
+                  {isNewLoom(l.id) && <NewPill />}
                   {(isCurrent || isLogged) && <Check className="w-3.5 h-3.5" strokeWidth={2.25} />}
                 </span>
                 {isCurrent && (

@@ -1,5 +1,5 @@
 import type { MasterRow, MasterRangeRow } from "./sheetSync";
-import { LOOM_CATALOG } from "./looms";
+import { LOOM_CATALOG, naturalLoomCompare } from "./looms";
 
 export interface DaySummary {
   meters: number;
@@ -132,7 +132,7 @@ export function perLoomTotals(rows: MasterRow[]): LoomDayTotal[] {
       rows: list.sort((x, y) => (x.shift < y.shift ? -1 : 1)),
     });
   }
-  return out.sort((a, b) => (a.loom < b.loom ? -1 : 1));
+  return out.sort((a, b) => naturalLoomCompare(a.loom, b.loom));
 }
 
 export function efficiencyBand(frac: number): "high" | "good" | "fair" | "low" {

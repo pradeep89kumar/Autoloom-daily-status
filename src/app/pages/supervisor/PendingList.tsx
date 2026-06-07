@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { AlertCircle, Check, Clock } from "lucide-react";
-import { LOOM_CATALOG } from "../../lib/looms";
+import { LOOM_CATALOG, isNewLoom } from "../../lib/looms";
+import { NewPill } from "../../components/NewPill";
 import { fetchRecentRows, type CapturedRow } from "../../lib/sheetSync";
 import { detectPendingSlots, type PendingSlot } from "../../lib/pending";
 import { isRunoutPending } from "../../lib/runoutFlags";
@@ -110,7 +111,10 @@ export function PendingList() {
                         disabled ? "opacity-70 cursor-default" : "hover:bg-gray-50"
                       }`}
                     >
-                      <span className="font-semibold">{s.loomName}</span>
+                      <span className="font-semibold inline-flex items-center gap-1">
+                        {s.loomName}
+                        {isNewLoom(s.loomId) && <NewPill />}
+                      </span>
                       <span className="flex-1 text-sm text-[var(--color-text-secondary)] flex items-center gap-2">
                         {isLogged ? (
                           <span className="inline-flex items-center gap-1 text-[var(--color-status-green)]">

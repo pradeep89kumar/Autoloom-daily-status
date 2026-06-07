@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { Check, ChevronDown } from "lucide-react";
-import { LOOM_CATALOG } from "../../lib/looms";
+import { LOOM_CATALOG, isNewLoom } from "../../lib/looms";
+import { NewPill } from "../../components/NewPill";
 import { Button } from "../../components/ui/button";
 import { showToast } from "../../components/Toast";
 import {
@@ -248,7 +249,10 @@ export function NewLoading() {
                           : "border-[var(--color-border-hairline)] bg-white"
                     }`}
                   >
-                    <span>{l.name}</span>
+                    <span className="inline-flex items-center gap-1">
+                      {l.name}
+                      {isNewLoom(l.id) && <NewPill />}
+                    </span>
                     <span className="text-[10px] font-normal opacity-80 truncate max-w-full">{sub}</span>
                   </button>
                 );

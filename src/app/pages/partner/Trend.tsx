@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchMasterRange, type MasterRangeRow } from "../../lib/sheetSync";
-import { LOOM_CATALOG } from "../../lib/looms";
+import { LOOM_CATALOG, isNewLoom } from "../../lib/looms";
+import { NewPill } from "../../components/NewPill";
 import {
   fmtMeters,
   fmtPercent,
@@ -324,7 +325,10 @@ export function PartnerTrend() {
               const avgMeters = activeDays > 0 ? (t?.meters ?? 0) / activeDays : 0;
               return (
                 <li key={loom} className="py-3 flex items-center gap-3">
-                  <span className="w-10 text-[16px] font-bold tabular-nums">{loom}</span>
+                  <span className="w-12 inline-flex items-baseline gap-1 text-[16px] font-bold tabular-nums">
+                    {loom}
+                    {isNewLoom(loom) && <NewPill />}
+                  </span>
                   <span className="flex-1 min-w-0">
                     <span className="block text-[14px] text-[var(--color-text-secondary)] tabular-nums truncate">
                       {fmtMeters(t?.meters ?? 0)} · {fmtRupees(t?.revenue ?? 0)}

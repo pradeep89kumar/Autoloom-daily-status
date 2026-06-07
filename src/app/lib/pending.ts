@@ -1,5 +1,6 @@
 import { addDays, shiftWindow, startOfDay, ymd, type Shift } from "./shift";
 import type { CapturedRow } from "./sheetSync";
+import { naturalLoomCompare } from "./looms";
 
 export type SlotStatus = "pending" | "late";
 
@@ -66,7 +67,7 @@ export function detectPendingSlots({
     }
   }
   slots.sort((a, b) => (a.dateYmd === b.dateYmd
-    ? (a.shift === b.shift ? a.loomName.localeCompare(b.loomName) : a.shift < b.shift ? 1 : -1)
+    ? (a.shift === b.shift ? naturalLoomCompare(a.loomName, b.loomName) : a.shift < b.shift ? 1 : -1)
     : a.dateYmd < b.dateYmd ? 1 : -1));
   return slots;
 }

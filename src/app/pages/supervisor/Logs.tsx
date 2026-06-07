@@ -3,7 +3,8 @@ import { useNavigate } from "react-router";
 import { Lock, Pencil } from "lucide-react";
 import { fetchFullRows, type FullRow } from "../../lib/sheetSync";
 import { fromYmd, shortDate } from "../../lib/shift";
-import { LOOM_CATALOG } from "../../lib/looms";
+import { LOOM_CATALOG, naturalLoomCompare, isNewLoom } from "../../lib/looms";
+import { NewPill } from "../../components/NewPill";
 
 type Preset = "today" | "yesterday" | "7d" | "all" | "custom";
 
@@ -22,7 +23,7 @@ export function Logs() {
       if (cancelled) return;
       const sorted = [...r].sort((a, b) =>
         a.date === b.date
-          ? (a.shift === b.shift ? a.loomId.localeCompare(b.loomId) : a.shift < b.shift ? 1 : -1)
+          ? (a.shift === b.shift ? naturalLoomCompare(a.loomId, b.loomId) : a.shift < b.shift ? 1 : -1)
           : a.date < b.date ? 1 : -1,
       );
       const wait = Math.max(0, 3000 - (Date.now() - startedAt));
@@ -147,7 +148,10 @@ export function Logs() {
                       className="w-full text-left px-4 py-3 flex flex-col gap-0.5 hover:bg-gray-50"
                     >
                       <div className="flex items-baseline gap-2">
-                        <span className="font-semibold text-[15px]">{r.loomId}</span>
+                        <span className="font-semibold text-[15px] inline-flex items-baseline gap-1">
+                          {r.loomId}
+                          {isNewLoom(r.loomId) && <NewPill />}
+                        </span>
                         <span className="text-[13px] text-[var(--color-text-secondary)] truncate">
                           {r.weaver || "—"}
                         </span>

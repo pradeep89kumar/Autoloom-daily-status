@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { AlertCircle, Check, Clock, Users } from "lucide-react";
-import { LOOM_CATALOG } from "../../lib/looms";
+import { LOOM_CATALOG, isNewLoom } from "../../lib/looms";
+import { NewPill } from "../../components/NewPill";
 
 import {
   fetchFullRows,
@@ -262,6 +263,7 @@ export function LoomFloor() {
                 >
                   <span className="inline-flex items-center gap-1">
                     {l.name}
+                    {isNewLoom(l.id) && <NewPill />}
                     {logged && <Check className="w-3.5 h-3.5" strokeWidth={2.25} />}
                   </span>
                   {logged && (
