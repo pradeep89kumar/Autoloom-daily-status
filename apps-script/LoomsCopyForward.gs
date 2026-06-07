@@ -1,17 +1,20 @@
 /**
  * Daily copy-forward automation for "looms_production".
- * LOOMS_PER_DAY is authoritative: each run normalises the latest day's block
- * to exactly this many rows before copying forward.
  *
- * Bootstrap on first 14-loom run:
- *   The latest day has 8 rows -> the script pads with 6 duplicates of the 8th row.
- *   Open the sheet once and rename those 6 rows to your real loom identifiers
- *   (e.g. L9..L14). Every subsequent day carries the corrected names automatically.
+ * Behaviour:
+ *  - Each run finds the latest date present in the sheet and copies its FULL
+ *    block (however many rows it spans) forward, stamping the next date.
+ *  - If multiple dates are missing (e.g. trigger failed on a previous day),
+ *    every missing date up to yesterday is filled in order, each copying the
+ *    most recent block at the time of copy.
+ *  - Block size is dynamic: whatever the latest day contains is what gets
+ *    copied. Add or remove loom rows freely; the next run picks up the change.
+ *  - Loom identifiers, weaver, RPM, rate-per-meter etc. are all carried over
+ *    from the source block; only the date column is overwritten.
  */
 
 const TARGET_SPREADSHEET_ID = '1WbsCT_pgF9tk5XgIWQSabH7D_ZWt7bqHks_-c7BcQBo';
 const DEFAULT_LOOMS_TAB_NAME = 'looms_production';
-const LOOMS_PER_DAY = 14;
 
 const LOOMS_TAB = 'LOOMS_TAB';
 const LOOMS_MONTH = 'LOOMS_MONTH';
@@ -78,78 +81,45 @@ function runLoomsDailyAutomation() {
   let latestKey = dateKey_(latestInfo.date, tz);
   if (latestKey >= targetKey) return;
 
-  // Normalise to LOOMS_PER_DAY before copy-forward.
-  normaliseLatestBlockToLoomsPerDay_(sheet, dateCol, tz);
-
-  // Re-read after normalisation.
-  latestInfo = getLatestDateInfo_(sheet, dateCol);
-  latestKey = dateKey_(latestInfo.date, tz);
-  const latestRow = latestInfo.row;
+  // Find the full extent of the latest day's block (dynamic size).
+  let { startRow: blockStartRow, size: blockSize } = findLatestBlockBounds_(
+    sheet, dateCol, latestInfo.row, latestKey, tz
+  );
   const lastColumn = sheet.getLastColumn();
 
-  let currentBlockStart = latestRow - LOOMS_PER_DAY + 1;
+  // Fill every missing date up to yesterday (or month-end), each copying the
+  // most recent block. The newly-written block becomes the source for the next
+  // iteration so the latest data always propagates forward.
   while (latestKey < targetKey) {
     const nextKey = nextDateKey_(latestKey);
     const nextDate = keyToDate_(nextKey);
 
-    const sourceRange = sheet.getRange(currentBlockStart, 1, LOOMS_PER_DAY, lastColumn);
+    const sourceRange = sheet.getRange(blockStartRow, 1, blockSize, lastColumn);
     const destinationStartRow = sheet.getLastRow() + 1;
-    const destinationRange = sheet.getRange(destinationStartRow, 1, LOOMS_PER_DAY, lastColumn);
+    const destinationRange = sheet.getRange(destinationStartRow, 1, blockSize, lastColumn);
     sourceRange.copyTo(destinationRange);
 
-    const nextDateValues = Array.from({ length: LOOMS_PER_DAY }, () => [nextDate]);
-    sheet.getRange(destinationStartRow, dateCol, LOOMS_PER_DAY, 1).setValues(nextDateValues);
+    const nextDateValues = Array.from({ length: blockSize }, () => [nextDate]);
+    sheet.getRange(destinationStartRow, dateCol, blockSize, 1).setValues(nextDateValues);
 
-    currentBlockStart = destinationStartRow;
+    blockStartRow = destinationStartRow;
     latestKey = nextKey;
   }
 }
 
 /**
- * Ensures the latest date's block is exactly LOOMS_PER_DAY rows.
- *  - too many  -> deletes trailing rows of the block
- *  - too few   -> duplicates the LAST row of the block to fill
- * No-op if already correct.
+ * Walks upward from the last data row to find the contiguous block of rows
+ * that share the latest date. Returns { startRow, size }.
  */
-function normaliseLatestBlockToLoomsPerDay_(sheet, dateCol, tz) {
-  const info = getLatestDateInfo_(sheet, dateCol);
-  const latestKey = dateKey_(info.date, tz);
-  const lastRow = info.row;
-
+function findLatestBlockBounds_(sheet, dateCol, lastRow, latestKey, tz) {
   const dateValues = sheet.getRange(2, dateCol, lastRow - 1, 1).getValues();
-  let blockStartRow = lastRow;
+  let startRow = lastRow;
   for (let row = lastRow - 1; row >= 2; row--) {
     const parsed = parseDateCell_(dateValues[row - 2][0]);
     if (!parsed || dateKey_(parsed, tz) !== latestKey) break;
-    blockStartRow = row;
+    startRow = row;
   }
-
-  const currentSize = lastRow - blockStartRow + 1;
-  if (currentSize === LOOMS_PER_DAY) return;
-
-  const lastColumn = sheet.getLastColumn();
-
-  if (currentSize > LOOMS_PER_DAY) {
-    const toDelete = currentSize - LOOMS_PER_DAY;
-    sheet.deleteRows(blockStartRow + LOOMS_PER_DAY, toDelete);
-    Logger.log('Trimmed ' + toDelete + ' row(s) from ' + latestKey + ' to reach ' + LOOMS_PER_DAY + '.');
-    return;
-  }
-
-  const padCount = LOOMS_PER_DAY - currentSize;
-  const templateRange = sheet.getRange(lastRow, 1, 1, lastColumn);
-  for (let i = 0; i < padCount; i++) {
-    const destRow = lastRow + 1 + i;
-    sheet.insertRowAfter(destRow - 1);
-    templateRange.copyTo(sheet.getRange(destRow, 1, 1, lastColumn));
-  }
-  const padDateValues = Array.from({ length: padCount }, () => [info.date]);
-  sheet.getRange(lastRow + 1, dateCol, padCount, 1).setValues(padDateValues);
-
-  Logger.log(
-    'Padded ' + padCount + ' row(s) on ' + latestKey + ' to reach ' + LOOMS_PER_DAY +
-    '. Rename the padded rows to your new loom identifiers (e.g. L9..L14).'
-  );
+  return { startRow: startRow, size: lastRow - startRow + 1 };
 }
 
 function cleanupLoomsDailyAutomation() {
