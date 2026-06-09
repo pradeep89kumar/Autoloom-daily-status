@@ -18,6 +18,7 @@
  *  GET  ?mode=master-receivables               → master Paagu ID receivables view
  *  GET  ?mode=cashflow                         → cash position + monthly summary from Master Control tab
  *  GET  ?mode=cashflow-ledger&from=&to=&account=&direction= → ledger entries for the statement view
+ *  GET  ?mode=capex&project=6%20Looms          → Capex Register entries + totals for one project (default "6 Looms")
  *  POST kind:"edit"           → overwrite Sheet1 row by rowIndex, only inside edit window
  */
 
@@ -34,6 +35,18 @@ var MASTER_PRODUCTION_TAB = "Looms_Production";
 var MASTER_ORDER_TAB = "Order";
 var MASTER_PAAGU_TAB = "Paagu ID";
 var MASTER_CASHFLOW_TAB = "Master Control";   // ← confirm exact tab name
+var MASTER_CAPEX_TAB = "Capex Register";
+
+// Capex Register columns (1-indexed, A..G only — only G-and-left are critical):
+//  A Date · B Project · C Expense · D Vendor · E Amount · F Paid From · G Funding Source
+var CAPEX_WIDTH         = 7;
+var CAPEX_COL_DATE      = 1;
+var CAPEX_COL_PROJECT   = 2;
+var CAPEX_COL_EXPENSE   = 3;
+var CAPEX_COL_VENDOR    = 4;
+var CAPEX_COL_AMOUNT    = 5;
+var CAPEX_COL_PAID_FROM = 6;
+var CAPEX_COL_FUNDING   = 7;
 
 // Closing balance row (Bank Statement Closing) + per-account columns (1-indexed).
 // Each ledger account spans two columns in the data area: a credit (in) col + a debit (out) col.
@@ -154,6 +167,10 @@ function doGet(e) {
     var cfAcct = (e.parameter && e.parameter.account)   || "";
     var cfDir  = (e.parameter && e.parameter.direction) || "";
     return _json({ ok: true, rows: _readCashLedger(cfFrom, cfTo, cfAcct, cfDir) });
+  }
+  if (mode === "capex") {
+    var capexProject = (e.parameter && e.parameter.project) || "6 Looms";
+    return _json({ ok: true, capex: _readCapex(capexProject) });
   }
   return _json({ ok: true, rows: _readLightRows(21) });
 }
@@ -718,6 +735,70 @@ function _readCashLedger(fromYmd, toYmd, accountKey, direction) {
 
   out.sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; });
   return out;
+}
+
+/* ------------------------------ master workbook · capex (New Shed) ------------------------------ */
+
+function _capexSheet() {
+  return SpreadsheetApp.openById(MASTER_SHEET_ID).getSheetByName(MASTER_CAPEX_TAB);
+}
+
+function _readCapex(projectFilter) {
+  var empty = { project: projectFilter, total: 0, count: 0, byFunding: {}, byExpense: {}, byPaidFrom: {}, rows: [] };
+  var sh = _capexSheet();
+  if (!sh) return empty;
+  var last = sh.getLastRow();
+  if (last < 1) return empty;
+
+  var values = sh.getRange(1, 1, last, CAPEX_WIDTH).getValues();
+  var key = String(projectFilter || "").trim().toLowerCase();
+
+  var rows = [];
+  var total = 0;
+  var byFunding = {};
+  var byExpense = {};
+  var byPaidFrom = {};
+
+  for (var i = 0; i < values.length; i++) {
+    var r = values[i];
+    var d = _toDate(r[CAPEX_COL_DATE - 1]);
+    if (!d) continue; // skip Total / header / blank rows
+    var project = String(r[CAPEX_COL_PROJECT - 1] || "").trim();
+    if (key && project.toLowerCase().indexOf(key) === -1) continue;
+    var amt = Number(r[CAPEX_COL_AMOUNT - 1]) || 0;
+    if (!amt) continue;
+
+    var expense  = String(r[CAPEX_COL_EXPENSE - 1] || "").trim();
+    var vendor   = String(r[CAPEX_COL_VENDOR - 1] || "").trim();
+    var paidFrom = String(r[CAPEX_COL_PAID_FROM - 1] || "").trim();
+    var funding  = String(r[CAPEX_COL_FUNDING - 1] || "").trim();
+
+    rows.push({
+      date: _ymd(d),
+      project: project,
+      expense: expense,
+      vendor: vendor,
+      amount: amt,
+      paidFrom: paidFrom,
+      fundingSource: funding
+    });
+    total += amt;
+    if (funding)  byFunding[funding]   = (byFunding[funding]   || 0) + amt;
+    if (expense)  byExpense[expense]   = (byExpense[expense]   || 0) + amt;
+    if (paidFrom) byPaidFrom[paidFrom] = (byPaidFrom[paidFrom] || 0) + amt;
+  }
+
+  rows.sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; });
+
+  return {
+    project: projectFilter,
+    total: total,
+    count: rows.length,
+    byFunding: byFunding,
+    byExpense: byExpense,
+    byPaidFrom: byPaidFrom,
+    rows: rows
+  };
 }
 
 /* ------------------------------ helpers ------------------------------ */

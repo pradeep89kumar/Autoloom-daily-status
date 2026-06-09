@@ -401,3 +401,39 @@ export async function fetchCashLedger(f: CashLedgerFilter = {}): Promise<CashLed
     return [];
   }
 }
+
+/* ------------------------------ capex (New Shed Expenses) ------------------------------ */
+
+export interface CapexRow {
+  date: string;            // YYYY-MM-DD
+  project: string;
+  expense: string;
+  vendor: string;
+  amount: number;
+  paidFrom: string;
+  fundingSource: string;
+}
+
+export interface CapexData {
+  project: string;
+  total: number;
+  count: number;
+  byFunding: Record<string, number>;
+  byExpense: Record<string, number>;
+  byPaidFrom: Record<string, number>;
+  rows: CapexRow[];
+}
+
+export async function fetchCapex(project: string = "6 Looms"): Promise<CapexData | null> {
+  if (!ENDPOINT) return null;
+  const params = new URLSearchParams({ mode: "capex", project });
+  try {
+    const res = await fetch(`${ENDPOINT}?${params.toString()}`, { method: "GET" });
+    const data = await res.json();
+    if (!data?.ok || !data.capex) return null;
+    return data.capex as CapexData;
+  } catch (e) {
+    console.warn("[sheetSync] fetchCapex failed", e);
+    return null;
+  }
+}

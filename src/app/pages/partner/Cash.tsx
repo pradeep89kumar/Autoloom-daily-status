@@ -164,10 +164,21 @@ export function PartnerCash() {
 
           <Link
             to="/partner/cash/statement"
-            className="flex items-center justify-between rounded-xl bg-white border border-[var(--color-border-hairline)] shadow-[0_2px_8px_rgba(0,0,0,0.06)] px-4 py-3 active:bg-black/[0.02]"
+            className="flex items-center justify-between rounded-xl bg-white border border-[var(--color-border-hairline)] shadow-[0_2px_8px_rgba(0,0,0,0.06)] px-4 py-3 active:bg-black/[0.02] mb-2"
           >
             <span className="text-[14px] font-medium text-[var(--color-text-primary)]">View statement</span>
             <ChevronRight className="w-4 h-4 text-[var(--color-text-secondary)]" strokeWidth={1.75} />
+          </Link>
+
+          <Link
+            to="/partner/cash/new-shed"
+            className="flex items-center justify-between rounded-xl bg-white border border-[var(--color-border-hairline)] shadow-[0_2px_8px_rgba(0,0,0,0.06)] px-4 py-3 active:bg-black/[0.02]"
+          >
+            <div className="min-w-0">
+              <p className="text-[14px] font-medium text-[var(--color-text-primary)]">New Shed Expenses</p>
+              <p className="text-[11px] text-[var(--color-text-secondary)] mt-0.5">6 looms project · capex register</p>
+            </div>
+            <ChevronRight className="w-4 h-4 text-[var(--color-text-secondary)] shrink-0" strokeWidth={1.75} />
           </Link>
         </>
       )}
