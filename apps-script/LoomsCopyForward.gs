@@ -37,7 +37,7 @@ function setupLoomsDailyAutomation() {
 
   const trigger = ScriptApp.newTrigger('runLoomsDailyAutomation')
     .timeBased()
-    .atHour(11)
+    .atHour(9)
     .everyDays(1)
     .inTimezone(tz)
     .create();
