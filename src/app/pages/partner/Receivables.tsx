@@ -31,12 +31,17 @@ type StatusKind = "unbilled" | "paid" | "partial" | "pending";
 function statusKind(r: ReceivableRow): StatusKind {
   const s = (r.paymentStatus || r.status || "").toLowerCase();
   if (!r.invoiceNumber || s.includes("unbilled")) return "unbilled";
+  // Honor explicit "Paid" mark from sheet — settlements with TDS / small
+  // debits won't show full receipts, so trust the status label.
+  if (s.includes("paid") && !s.includes("partial") && !s.includes("unpaid")) return "paid";
   if (s.includes("partial")) return "partial";
   if (effectivePending(r) <= 0 && r.invoiceAmount > 0) return "paid";
   return "pending";
 }
 
 function effectivePending(r: ReceivableRow): number {
+  const s = (r.paymentStatus || r.status || "").toLowerCase();
+  if (s.includes("paid") && !s.includes("partial") && !s.includes("unpaid")) return 0;
   if (r.invoiceAmount > 0) {
     return Math.max(0, r.invoiceAmount - (r.receipts || 0));
   }
