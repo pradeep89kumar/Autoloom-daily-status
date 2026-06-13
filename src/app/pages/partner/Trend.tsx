@@ -625,14 +625,17 @@ function MonthTargetCard({
         ) : null}
       </div>
 
-      {/* Hero — what has actually been earned (concrete fact, neutral colour) */}
-      <div className="flex items-baseline gap-2">
+      {/* Hero — what has actually been earned, against the hard ₹15L target */}
+      <div className="flex items-baseline gap-1.5">
         <span className="text-[32px] font-bold tabular-nums leading-tight text-[var(--color-text-primary)]">
           {fmtLakh(stats.revenue)}
         </span>
-        <span className="text-[14px] text-[var(--color-text-secondary)]">
-          தயாரித்தது · {stats.daysElapsed} நாட்களில்
+        <span className="text-[16px] font-semibold tabular-nums text-[var(--color-text-secondary)] leading-tight">
+          / ₹15L இலக்கு
         </span>
+      </div>
+      <div className="text-[13px] text-[var(--color-text-secondary)] mt-0.5">
+        தயாரித்தது · {stats.daysElapsed} நாட்களில்
       </div>
 
       {/* Progress toward the hard ₹15L target, with a tick for "by today" */}
@@ -649,7 +652,7 @@ function MonthTargetCard({
       </div>
       <div className="flex items-center justify-between mt-1.5">
         <span className="text-[12px] text-[var(--color-text-secondary)] tabular-nums">
-          ₹15L இலக்கு · இன்றுவரை {fmtLakh(stats.shouldBeByToday)} வேண்டும்
+          இன்றுவரை {fmtLakh(stats.shouldBeByToday)} இருக்கவேண்டும்
         </span>
         <span className={`text-[12px] font-semibold tabular-nums ${tone.text}`}>
           {fmtPercent(stats.targetFraction)}
