@@ -8,7 +8,7 @@ import {
   CircleDashed,
   CloudSlash,
   ArrowClockwise,
-  CaretRight,
+  ArrowRight,
   SquaresFour,
   type Icon,
 } from "@phosphor-icons/react";
@@ -185,8 +185,8 @@ function FloorStrip({
         {stages.map((state, i) => (
           <Fragment key={state}>
             {i > 0 && (
-              <div className="flex items-center self-center shrink-0">
-                <CaretRight className="w-3 h-3 text-[var(--color-text-tertiary)]" weight="bold" />
+              <div className="flex items-center self-center shrink-0 px-0.5">
+                <ArrowRight className="w-4 h-4 text-[var(--color-text-tertiary)]" weight="bold" />
               </div>
             )}
             <StageChip
@@ -423,22 +423,27 @@ function SectionHeader({ state, count }: { state: BeamState; count: number }) {
 
 /* ------------------------------ cards ------------------------------ */
 /**
- * Asset id as a small machined plate — neutral, monospace, with a dot at each
- * of the four corners like the screws on a luggage tag. The id itself carries
- * the SAT / VVK prefix; the treatment is identical for every beam.
+ * Asset id as a small machined plate — a warm brass tint with a dot at each of
+ * the four corners like the screws on a luggage tag. The id itself carries the
+ * SAT / VVK prefix; the treatment is identical for every beam.
  */
 function AssetId({ id }: { id: string }) {
-  const screw =
-    "absolute w-[2.5px] h-[2.5px] rounded-full bg-[var(--color-text-tertiary)]";
+  const tint = "var(--color-status-amber)";
+  const screw = "absolute w-[2.5px] h-[2.5px] rounded-full";
   return (
     <span
-      className="relative inline-flex items-center justify-center px-3 py-1 rounded-[5px] text-[11px] font-bold tracking-tight tabular-nums text-[var(--color-text-primary)] bg-[var(--color-bg-base)] border border-[var(--color-border-hairline)]"
-      style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}
+      className="relative inline-flex items-center justify-center px-3 py-1 rounded-[5px] text-[11px] font-bold tracking-tight tabular-nums"
+      style={{
+        fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+        color: `color-mix(in srgb, ${tint} 72%, var(--color-text-primary))`,
+        background: `color-mix(in srgb, ${tint} 12%, white)`,
+        border: `1px solid color-mix(in srgb, ${tint} 32%, var(--color-border-hairline))`,
+      }}
     >
-      <span className={`${screw} left-[3px] top-[3px]`} aria-hidden />
-      <span className={`${screw} right-[3px] top-[3px]`} aria-hidden />
-      <span className={`${screw} left-[3px] bottom-[3px]`} aria-hidden />
-      <span className={`${screw} right-[3px] bottom-[3px]`} aria-hidden />
+      <span className={`${screw} left-[3px] top-[3px]`} style={{ background: tint }} aria-hidden />
+      <span className={`${screw} right-[3px] top-[3px]`} style={{ background: tint }} aria-hidden />
+      <span className={`${screw} left-[3px] bottom-[3px]`} style={{ background: tint }} aria-hidden />
+      <span className={`${screw} right-[3px] bottom-[3px]`} style={{ background: tint }} aria-hidden />
       {id}
     </span>
   );
