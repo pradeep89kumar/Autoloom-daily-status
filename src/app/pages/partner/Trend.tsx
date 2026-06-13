@@ -21,15 +21,25 @@ type Metric = "efficiency" | "meters" | "revenue";
 const DAYS = 14;
 const LOOMS = LOOM_CATALOG.map((l) => l.name);
 
-// Monthly revenue target (round figure). Pro-rated by elapsed operating days
-// so mid-month attainment is judged fairly, not against the full month.
+// Monthly revenue target (round figure). ₹15L is the only hard number.
+// Days are calendar days of the current month (28–31), since the looms run
+// every calendar day in shifts — no Sunday/holiday exclusion.
 const MONTHLY_TARGET = 1500000;
-const DAYS_IN_MONTH = 30;
-const TARGET_PER_DAY = MONTHLY_TARGET / DAYS_IN_MONTH; // ₹50,000
+// Per-loom/day target implied by ₹15L ÷ 30 ÷ 14 ≈ ₹3,571, rounded.
+const PER_LOOM_DAY_TARGET = 3500;
+// New looms were rolled out on this date; rows before it are copy-forward
+// phantoms that never physically ran.
+const NEW_LOOM_START = "2026-06-07";
 
 function fmtLakh(n: number): string {
   if (!isFinite(n)) return "—";
   return `₹${(n / 100000).toFixed(1)}L`;
+}
+
+function fmtThousand(n: number): string {
+  if (!isFinite(n)) return "—";
+  if (Math.abs(n) >= 100000) return fmtLakh(n);
+  return `₹${(Math.round(n / 100) / 10).toFixed(1)}k`;
 }
 
 function ymd(d: Date): string {
@@ -103,6 +113,7 @@ export function PartnerTrend() {
   const [rows, setRows] = useState<MasterRangeRow[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [mtdRows, setMtdRows] = useState<MasterRangeRow[] | null>(null);
+  const [showDetail, setShowDetail] = useState(false);
 
   const dates = useMemo(() => lastNDates(DAYS), []);
 
@@ -123,8 +134,7 @@ export function PartnerTrend() {
       // they were copied forward by the master sheet automation but never
       // physically ran. Otherwise their averages and heatmap would be skewed
       // by zero-meter rows.
-      const NEW_LOOM_START_YMD = "2026-06-07";
-      const filtered = r.filter((row) => !(isNewLoom(row.loom) && row.date < NEW_LOOM_START_YMD));
+      const filtered = r.filter((row) => !(isNewLoom(row.loom) && row.date < NEW_LOOM_START));
       const wait = Math.max(0, 400 - (Date.now() - startedAt));
       setTimeout(() => {
         if (!alive) return;
@@ -144,7 +154,7 @@ export function PartnerTrend() {
     fetchMasterRange(from, to).then((r) => {
       if (!alive) return;
       const filtered = r.filter(
-        (row) => !(isNewLoom(row.loom) && row.date < "2026-06-07"),
+        (row) => !(isNewLoom(row.loom) && row.date < NEW_LOOM_START),
       );
       setMtdRows(filtered);
     });
@@ -157,20 +167,93 @@ export function PartnerTrend() {
 
   const targetStats = useMemo(() => {
     if (!mtdRows) return null;
+    const now = new Date();
+    // Calendar days — the looms run every day in shifts, so day-of-month is
+    // the honest denominator (a zero-revenue day is a real slow day).
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const dayOfMonth = now.getDate();
+    const targetPerDay = MONTHLY_TARGET / daysInMonth;
+
     let revenue = 0;
-    const dateSet = new Set<string>();
-    for (const r of mtdRows) {
-      revenue += r.revenue;
-      if (r.revenue > 0 || r.meters > 0) dateSet.add(r.date);
-    }
-    const daysElapsed = dateSet.size;
-    const targetToDate = TARGET_PER_DAY * daysElapsed;
-    const attainment = targetToDate > 0 ? revenue / targetToDate : 0;
-    const avgPerDay = daysElapsed > 0 ? revenue / daysElapsed : 0;
-    const projected = avgPerDay * DAYS_IN_MONTH;
+    for (const r of mtdRows) revenue += r.revenue;
+
+    const shouldBeByToday = targetPerDay * dayOfMonth;
+    const paceFraction = shouldBeByToday > 0 ? revenue / shouldBeByToday : 0;
+    const avgPerDay = dayOfMonth > 0 ? revenue / dayOfMonth : 0;
+    const projected = avgPerDay * daysInMonth;
     const gap = MONTHLY_TARGET - projected;
-    return { revenue, daysElapsed, targetToDate, attainment, avgPerDay, projected, gap };
+
+    return {
+      revenue,
+      daysInMonth,
+      dayOfMonth,
+      targetPerDay,
+      shouldBeByToday,
+      paceFraction,
+      avgPerDay,
+      projected,
+      gap,
+    };
   }, [mtdRows]);
+
+  // Per-loom month-to-date status, for the diagnosis tier.
+  const loomStatus = useMemo(() => {
+    if (!mtdRows) return null;
+    const dayOfMonth = new Date().getDate();
+    const revByLoom = new Map<string, number>();
+    for (const r of mtdRows) {
+      revByLoom.set(r.loom, (revByLoom.get(r.loom) || 0) + r.revenue);
+    }
+    const out = LOOMS.map((loom) => {
+      const total = revByLoom.get(loom) || 0;
+      const avg = dayOfMonth > 0 ? total / dayOfMonth : 0;
+      let band: "on" | "below" | "weak" | "idle";
+      if (total <= 0) band = "idle";
+      else if (avg >= PER_LOOM_DAY_TARGET) band = "on";
+      else if (avg >= PER_LOOM_DAY_TARGET * 0.6) band = "below";
+      else band = "weak";
+      return { loom, total, avg, band };
+    });
+    return out;
+  }, [mtdRows]);
+
+  // Momentum — this week's pace vs last week's pace (from the 14-day window).
+  // Needs enough prior data; otherwise we hide the chip rather than mislead.
+  const momentum = useMemo(() => {
+    if (!rows || rows.length === 0) return null;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const cutoff = new Date(today);
+    cutoff.setDate(today.getDate() - 6); // last 7 days incl. today
+    const cutoffY = ymd(cutoff);
+    const priorStart = new Date(today);
+    priorStart.setDate(today.getDate() - 13);
+    const priorStartY = ymd(priorStart);
+
+    let thisWeek = 0;
+    const thisDays = new Set<string>();
+    let lastWeek = 0;
+    const lastDays = new Set<string>();
+    for (const r of rows) {
+      if (r.date >= cutoffY) {
+        thisWeek += r.revenue;
+        thisDays.add(r.date);
+      } else if (r.date >= priorStartY) {
+        lastWeek += r.revenue;
+        lastDays.add(r.date);
+      }
+    }
+    if (lastDays.size < 4 || thisDays.size < 4) return null;
+    const thisPace = thisWeek / thisDays.size;
+    const lastPace = lastWeek / lastDays.size;
+    if (lastPace <= 0) return null;
+    const delta = (thisPace - lastPace) / lastPace;
+    let dir: "up" | "flat" | "down";
+    if (delta > 0.03) dir = "up";
+    else if (delta < -0.03) dir = "down";
+    else dir = "flat";
+    return { dir, delta, thisPace, lastPace };
+  }, [rows]);
 
   const maxByMetric = useMemo(() => {
     let max = 0;
@@ -208,13 +291,24 @@ export function PartnerTrend() {
 
   return (
     <div className="px-4 py-4">
-      {/* Monthly target tracker */}
+      {/* Monthly target tracker — verdict-first */}
       {targetStats ? (
-        <MonthTargetCard stats={targetStats} monthStart={monthStart} />
+        <MonthTargetCard stats={targetStats} monthStart={monthStart} momentum={momentum} loomStatus={loomStatus} />
       ) : (
-        <div className="h-32 bg-black/[0.04] rounded-xl animate-pulse mb-5" />
+        <div className="h-56 bg-black/[0.04] rounded-xl animate-pulse mb-5" />
       )}
 
+      {/* Tier 4 — detail on demand */}
+      <button
+        onClick={() => setShowDetail((v) => !v)}
+        className="w-full flex items-center justify-between rounded-xl bg-white border border-[var(--color-border-hairline)] px-4 py-3 active:bg-black/[0.02]"
+      >
+        <span className="text-[14px] font-medium text-[var(--color-text-primary)]">14 நாள் விவரம்</span>
+        <Chevron open={showDetail} />
+      </button>
+
+      {!showDetail ? null : (
+      <div className="mt-5">
       <div className="mb-4">
         <h2 className="text-[18px] font-bold mb-1 text-[var(--color-text-primary)]">கடந்த {DAYS} நாட்கள்</h2>
         <p className="text-[14px] text-[var(--color-text-secondary)]">
@@ -429,6 +523,8 @@ export function PartnerTrend() {
           </ul>
         )}
       </div>
+      </div>
+      )}
     </div>
   );
 }
@@ -436,73 +532,195 @@ export function PartnerTrend() {
 function MonthTargetCard({
   stats,
   monthStart,
+  momentum,
+  loomStatus,
 }: {
   stats: {
     revenue: number;
-    daysElapsed: number;
-    targetToDate: number;
-    attainment: number;
+    daysInMonth: number;
+    dayOfMonth: number;
+    targetPerDay: number;
+    shouldBeByToday: number;
+    paceFraction: number;
     avgPerDay: number;
     projected: number;
     gap: number;
   };
   monthStart: Date;
+  momentum: { dir: "up" | "flat" | "down"; delta: number } | null;
+  loomStatus: { loom: string; total: number; avg: number; band: "on" | "below" | "weak" | "idle" }[] | null;
 }) {
   const monthName = monthStart.toLocaleDateString("en-GB", { month: "long" });
-  const barPct = Math.max(0, Math.min(1, stats.attainment)) * 100;
 
-  // Colour by projected month landing vs the full target.
+  // Trajectory drives the hero colour — is the trend heading the right way?
+  // Falls back to projected-vs-target when momentum data is insufficient.
   const ratio = stats.projected / MONTHLY_TARGET;
-  const tone =
-    ratio >= 1
-      ? { bar: "bg-[var(--color-status-green)]", text: "text-[var(--color-status-green)]" }
-      : ratio >= 0.8
-      ? { bar: "bg-[var(--color-status-amber)]", text: "text-[var(--color-status-amber)]" }
-      : { bar: "bg-[var(--color-status-red)]", text: "text-[var(--color-status-red)]" };
+  const trajectoryTone =
+    momentum?.dir === "up" || (momentum == null && ratio >= 1)
+      ? { text: "text-[var(--color-status-green)]", bar: "bg-[var(--color-status-green)]", soft: "bg-[var(--color-status-green)]/10", border: "border-[var(--color-status-green)]/30" }
+      : momentum?.dir === "down" || (momentum == null && ratio < 0.8)
+      ? { text: "text-[var(--color-status-red)]", bar: "bg-[var(--color-status-red)]", soft: "bg-[var(--color-status-red)]/10", border: "border-[var(--color-status-red)]/30" }
+      : { text: "text-[var(--color-status-amber)]", bar: "bg-[var(--color-status-amber)]", soft: "bg-[var(--color-status-amber)]/10", border: "border-[var(--color-status-amber)]/30" };
 
-  const shortfall = stats.gap > 0;
+  const paceBarPct = Math.max(0, Math.min(1, stats.paceFraction)) * 100;
+
+  // Diagnosis sentence — mostly English with loom IDs.
+  const diagnosis = loomStatus ? buildDiagnosis(loomStatus) : null;
 
   return (
-    <div className="rounded-xl bg-white border border-[var(--color-border-hairline)] shadow-[0_2px_8px_rgba(0,0,0,0.06)] px-4 py-4 mb-5">
-      <div className="flex items-baseline justify-between mb-2">
+    <div className="rounded-xl bg-white border border-[var(--color-border-hairline)] shadow-[0_2px_8px_rgba(0,0,0,0.06)] px-4 pt-4 pb-4 mb-4">
+      {/* Tier 1 — verdict */}
+      <div className="flex items-start justify-between mb-1">
         <span className="text-[12px] uppercase tracking-wide text-[var(--color-text-secondary)]">
-          மாத இலக்கு · {monthName}
+          இந்த மாதம் · {monthName}
         </span>
-        <span className="text-[13px] font-semibold text-[var(--color-text-primary)] tabular-nums">
-          {fmtLakh(MONTHLY_TARGET)}
-        </span>
+        {momentum ? (
+          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[12px] font-semibold ${trajectoryTone.soft} ${trajectoryTone.text}`}>
+            {momentum.dir === "up" ? "↑ முன்னேற்றம்" : momentum.dir === "down" ? "↓ குறைவு" : "→ நிலையானது"}
+          </span>
+        ) : null}
       </div>
 
       <div className="flex items-baseline gap-2">
-        <span className="text-[28px] font-bold tabular-nums text-[var(--color-text-primary)] leading-tight">
-          {fmtRupees(stats.revenue)}
+        <span className={`text-[30px] font-bold tabular-nums leading-tight ${trajectoryTone.text}`}>
+          {fmtLakh(stats.projected)}
         </span>
-        <span className={`text-[15px] font-semibold tabular-nums ${tone.text}`}>
-          {fmtPercent(stats.attainment)}
+        <span className="text-[15px] text-[var(--color-text-secondary)]">
+          நோக்கி · {fmtLakh(MONTHLY_TARGET)} இலக்கில்
         </span>
       </div>
 
-      <div className="mt-2 h-2 rounded-full bg-black/[0.06] overflow-hidden">
-        <div className={`h-full rounded-full ${tone.bar}`} style={{ width: `${barPct}%` }} />
+      {/* Pace-to-date bar with a "today" tick at 100% */}
+      <div className="mt-3 relative h-2 rounded-full bg-black/[0.06] overflow-hidden">
+        <div className={`h-full rounded-full ${trajectoryTone.bar}`} style={{ width: `${paceBarPct}%` }} />
       </div>
-      <p className="text-[12px] text-[var(--color-text-secondary)] mt-1.5">
-        இலக்கு {fmtRupees(stats.targetToDate)} வரை · {stats.daysElapsed} நாட்கள்
-      </p>
+      <div className="flex items-center justify-between mt-1.5">
+        <p className="text-[12px] text-[var(--color-text-secondary)] tabular-nums">
+          இன்றுவரை இருக்கவேண்டியது {fmtLakh(stats.shouldBeByToday)}
+        </p>
+        <p className={`text-[12px] font-semibold tabular-nums ${trajectoryTone.text}`}>
+          {fmtPercent(stats.paceFraction)}
+        </p>
+      </div>
 
-      <div className="mt-3 pt-3 border-t border-[var(--color-border-hairline)] flex items-center justify-between text-[13px]">
-        <span className="text-[var(--color-text-secondary)] tabular-nums">
-          Pace {fmtRupees(stats.avgPerDay)}/நாள்
-        </span>
-        <span className="text-[var(--color-text-primary)] font-medium tabular-nums">
-          Projected {fmtLakh(stats.projected)}
-        </span>
+      {/* Tier 2 — story trio */}
+      <div className="mt-3 pt-3 border-t border-[var(--color-border-hairline)] grid grid-cols-3 gap-2">
+        <TrioCell label="வந்தது" value={fmtLakh(stats.revenue)} />
+        <TrioCell label="Pace" value={`${fmtThousand(stats.avgPerDay)}/day`} />
+        <TrioCell label="Projected" value={fmtLakh(stats.projected)} />
       </div>
-      <p className={`text-[12px] font-medium mt-1 tabular-nums ${shortfall ? tone.text : "text-[var(--color-status-green)]"}`}>
-        {shortfall
-          ? `${fmtLakh(stats.gap)} குறைவாக இருக்கும்`
-          : `இலக்கை ${fmtLakh(-stats.gap)} தாண்டும்`}
-      </p>
+
+      {/* Tier 3 — diagnosis */}
+      {loomStatus ? (
+        <div className="mt-3 pt-3 border-t border-[var(--color-border-hairline)]">
+          <div className="text-[12px] uppercase tracking-wide text-[var(--color-text-secondary)] mb-1.5">காரணம்</div>
+          {diagnosis ? (
+            <p className="text-[13px] text-[var(--color-text-primary)] leading-relaxed mb-2.5">{diagnosis}</p>
+          ) : null}
+          <LoomChips status={loomStatus} />
+        </div>
+      ) : null}
     </div>
+  );
+}
+
+function TrioCell({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-[11px] text-[var(--color-text-secondary)]">{label}</div>
+      <div className="text-[15px] font-bold tabular-nums text-[var(--color-text-primary)] leading-tight">{value}</div>
+    </div>
+  );
+}
+
+const CHIP_TONE: Record<"on" | "below" | "weak" | "idle", string> = {
+  on: "bg-[var(--color-status-green)]/15 text-[var(--color-status-green)]",
+  below: "bg-[var(--color-status-amber)]/15 text-[var(--color-status-amber)]",
+  weak: "bg-[var(--color-status-red)]/15 text-[var(--color-status-red)]",
+  idle: "bg-black/[0.06] text-[var(--color-text-secondary)]",
+};
+
+function LoomChips({
+  status,
+}: {
+  status: { loom: string; band: "on" | "below" | "weak" | "idle" }[];
+}) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {status.map((s) => (
+        <span
+          key={s.loom}
+          className={`inline-flex items-center justify-center min-w-[32px] px-1.5 py-1 rounded-md text-[12px] font-semibold tabular-nums ${CHIP_TONE[s.band]}`}
+        >
+          {s.loom}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// Build a plain-language reason sentence. English-leaning with loom IDs so the
+// partner can scan it like an ops note.
+function buildDiagnosis(
+  status: { loom: string; band: "on" | "below" | "weak" | "idle" }[],
+): string {
+  const on = status.filter((s) => s.band === "on");
+  const idle = status.filter((s) => s.band === "idle");
+  const lagging = status.filter((s) => s.band === "below" || s.band === "weak");
+
+  const parts: string[] = [];
+  if (on.length === status.length) {
+    return `All ${status.length} looms on target.`;
+  }
+  parts.push(`${on.length}/${status.length} looms on target.`);
+
+  const tail: string[] = [];
+  if (lagging.length > 0) {
+    tail.push(`${joinLooms(lagging.map((s) => s.loom))} ramping`);
+  }
+  if (idle.length > 0) {
+    tail.push(`${joinLooms(idle.map((s) => s.loom))} idle`);
+  }
+  if (tail.length > 0) {
+    parts.push(`Shortfall is ${tail.join(", ")}.`);
+  }
+  return parts.join(" ");
+}
+
+// Compress consecutive loom IDs (L9, L10, L11 → L9–L11) for a tidy sentence.
+function joinLooms(looms: string[]): string {
+  const nums = looms
+    .map((l) => ({ l, n: parseInt(l.replace(/\D/g, ""), 10) }))
+    .filter((x) => !isNaN(x.n))
+    .sort((a, b) => a.n - b.n);
+  if (nums.length === 0) return looms.join(", ");
+  const ranges: string[] = [];
+  let start = nums[0];
+  let prev = nums[0];
+  for (let i = 1; i < nums.length; i++) {
+    if (nums[i].n === prev.n + 1) {
+      prev = nums[i];
+    } else {
+      ranges.push(start === prev ? start.l : `${start.l}–${prev.l}`);
+      start = nums[i];
+      prev = nums[i];
+    }
+  }
+  ranges.push(start === prev ? start.l : `${start.l}–${prev.l}`);
+  return ranges.join(", ");
+}
+
+function Chevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      className={`text-[var(--color-text-secondary)] transition-transform ${open ? "rotate-180" : ""}`}
+    >
+      <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }
 
