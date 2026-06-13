@@ -9,6 +9,7 @@ import {
   CircleDashed,
   CloudSlash,
   ArrowClockwise,
+  Funnel,
   type Icon,
 } from "@phosphor-icons/react";
 import { getBeamSource } from "../../lib/beamSource";
@@ -360,31 +361,45 @@ function FlowStrip({
           })}
         </svg>
 
-        {/* tap targets + labels */}
-        <div className="grid grid-cols-4 mt-1.5">
-          {nodes.map((n) => {
-            const meta = BEAM_STATE_META[n.s];
-            const StateIcon = STATE_ICON[n.s];
-            const isSel = selected === n.s;
-            return (
-              <button
-                key={n.s}
-                onClick={() => onSelect(n.s)}
-                className="flex flex-col items-center gap-0.5 py-1 rounded-lg"
-                style={{ background: isSel ? `color-mix(in srgb, ${meta.token} 9%, transparent)` : "transparent" }}
-              >
-                <div className="flex items-center gap-1">
-                  <StateIcon style={{ color: meta.token, width: 13, height: 13 }} weight={isSel ? "fill" : "duotone"} />
-                  <span className="text-[16px] font-bold tabular-nums leading-none" style={{ color: meta.token }}>
-                    {data.counts[n.s]}
+        {/* filter chips — clearly tappable, one stage at a time */}
+        <div className="mt-2.5">
+          <div className="flex items-center gap-1 mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-tertiary)]">
+            <Funnel className="w-3 h-3" weight="bold" />
+            Tap a stage to filter
+          </div>
+          <div className="grid grid-cols-4 gap-1.5">
+            {nodes.map((n) => {
+              const meta = BEAM_STATE_META[n.s];
+              const StateIcon = STATE_ICON[n.s];
+              const isSel = selected === n.s;
+              return (
+                <button
+                  key={n.s}
+                  onClick={() => onSelect(n.s)}
+                  aria-pressed={isSel}
+                  className="flex flex-col items-center gap-1 py-2 rounded-xl border transition-colors active:scale-[0.97]"
+                  style={{
+                    borderColor: isSel ? meta.token : "var(--color-border-hairline)",
+                    background: isSel ? `color-mix(in srgb, ${meta.token} 12%, white)` : "white",
+                    boxShadow: isSel ? `inset 0 0 0 1px ${meta.token}` : "none",
+                  }}
+                >
+                  <div className="flex items-center gap-1">
+                    <StateIcon style={{ color: meta.token, width: 14, height: 14 }} weight={isSel ? "fill" : "duotone"} />
+                    <span className="text-[16px] font-bold tabular-nums leading-none" style={{ color: meta.token }}>
+                      {data.counts[n.s]}
+                    </span>
+                  </div>
+                  <span
+                    className="text-[10px] leading-tight font-semibold"
+                    style={{ color: isSel ? meta.token : "var(--color-text-secondary)" }}
+                  >
+                    {meta.label}
                   </span>
-                </div>
-                <span className={`text-[10px] leading-tight ${isSel ? "font-semibold text-[var(--color-text-primary)]" : "text-[var(--color-text-secondary)]"}`}>
-                  {meta.label}
-                </span>
-              </button>
-            );
-          })}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
     </div>
@@ -413,20 +428,39 @@ function ribbonPath(
 /* ----------------------------- sections ----------------------------- */
 function StationSection({ state, beams }: { state: BeamState; beams: Beam[] }) {
   const meta = BEAM_STATE_META[state];
+  // Looms run in number order — list loaded beams in loom sequence.
+  const ordered = state === "loaded" ? [...beams].sort(byLoom) : beams;
   return (
     <div className="px-4">
-      <SectionHeader state={state} count={beams.length} />
-      {beams.length === 0 ? (
+      <SectionHeader state={state} count={ordered.length} />
+      {ordered.length === 0 ? (
         <Empty label={`No beams ${meta.label.toLowerCase()}`} />
       ) : (
         <div className="flex flex-col gap-2">
-          {beams.map((b) => (
+          {ordered.map((b) => (
             <BeamCard key={b.id} beam={b} />
           ))}
         </div>
       )}
     </div>
   );
+}
+
+/** Loom display: bare number → "L8"; already-prefixed stays as-is. */
+function fmtLoom(loom?: string): string {
+  if (!loom) return "";
+  const t = loom.trim();
+  return /^l/i.test(t) ? t.toUpperCase() : `L${t}`;
+}
+
+/** Sort beams by loom number ascending; non-numeric looms sink to the end. */
+function byLoom(a: Beam, b: Beam): number {
+  const na = parseInt(a.loom ?? "", 10);
+  const nb = parseInt(b.loom ?? "", 10);
+  if (Number.isNaN(na) && Number.isNaN(nb)) return 0;
+  if (Number.isNaN(na)) return 1;
+  if (Number.isNaN(nb)) return -1;
+  return na - nb;
 }
 
 function ReadySection({ data }: { data: BeamRegisterData }) {
@@ -525,7 +559,7 @@ function BeamCard({ beam, showState }: { beam: Beam; showState?: boolean }) {
       </div>
       <div className="text-right shrink-0">
         {beam.state === "loaded" && beam.loom && (
-          <span className="text-[13px] font-bold text-[var(--color-brand-primary)]">{beam.loom}</span>
+          <span className="text-[13px] font-bold text-[var(--color-brand-primary)] tabular-nums">{fmtLoom(beam.loom)}</span>
         )}
         {beam.state === "vendor" && (
           <span className="text-[12px] font-semibold text-[var(--color-status-amber)]">{beam.vendor}</span>
