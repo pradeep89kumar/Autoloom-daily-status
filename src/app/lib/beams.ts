@@ -138,15 +138,23 @@ export function normalizeBeams(data: BeamSheetData): BeamRegisterData {
   };
 
   // 1. Loaded — highest priority.
+  // The "R.O STATUS" loaded summary is a per-loom roster in loom order
+  // (row 1 = L1, row 2 = L2, …). The sheet's own loom-number column reads
+  // unreliably (shifted by one), so the canonical loom is the beam's position
+  // in this in-order list. Cross-checked against the design roster: design ↔
+  // loom match exactly (e.g. VC/B-16-2 = L1, VC/B-15 = L2, SL-2717-2 = L8).
+  let loomSeq = 0;
   for (const r of data.loaded) {
     const id = canonicalBeamId(r.beamNo);
     if (!id) continue;
+    loomSeq += 1;
+    const loom = String(loomSeq);
     claim(id, r.beamNo, {
       id,
       rawId: String(r.beamNo).trim(),
       state: "loaded",
-      location: String(r.loom || "").trim().toUpperCase() || IN_SAT,
-      loom: String(r.loom || "").trim().toUpperCase() || undefined,
+      location: `L${loom}`,
+      loom,
       design: String(r.design || "").trim() || undefined,
       customer: r.customer ? String(r.customer).trim() : undefined,
       roDate: r.roDate ? String(r.roDate).trim() : undefined,
