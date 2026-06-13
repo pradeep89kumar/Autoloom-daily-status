@@ -163,20 +163,12 @@ export function LoomFloor() {
           <Users className="w-4 h-4" weight="bold" />
           Switch
         </button>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => navigate("/supervisor/beams")}
-            className="inline-flex items-center px-2.5 py-1.5 rounded-lg border border-[var(--color-border-hairline)] text-sm hover:bg-gray-50"
-          >
-            பீம்
-          </button>
-          <button
-            onClick={() => navigate("/supervisor/logs")}
-            className="inline-flex items-center px-2.5 py-1.5 rounded-lg border border-[var(--color-border-hairline)] text-sm hover:bg-gray-50"
-          >
-            பழைய பதிவுகள்
-          </button>
-        </div>
+        <button
+          onClick={() => navigate("/supervisor/logs")}
+          className="inline-flex items-center px-2.5 py-1.5 rounded-lg border border-[var(--color-border-hairline)] text-sm hover:bg-gray-50"
+        >
+          பழைய பதிவுகள்
+        </button>
       </div>
 
       {loading && <LoomFloorSkeleton />}

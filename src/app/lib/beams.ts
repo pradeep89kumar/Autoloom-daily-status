@@ -277,10 +277,10 @@ export function compareBeamId(a: string, b: string): number {
 
 export const BEAM_STATE_META: Record<
   BeamState,
-  { label: string; tamil: string; emoji: string; token: string }
+  { label: string; tamil: string; token: string }
 > = {
-  vendor: { label: "At vendor", tamil: "வார்ப்பிங்", emoji: "🏭", token: "var(--color-status-amber)" },
-  ready: { label: "Ready", tamil: "தயார்", emoji: "✅", token: "var(--color-status-green)" },
-  loaded: { label: "Loaded", tamil: "ஏற்றியது", emoji: "⚙️", token: "var(--color-brand-primary)" },
-  empty: { label: "Empty", tamil: "காலி", emoji: "⭕", token: "var(--color-text-tertiary)" },
+  vendor: { label: "At vendor", tamil: "வார்ப்பிங்", token: "var(--color-status-amber)" },
+  ready: { label: "Ready", tamil: "தயார்", token: "var(--color-status-green)" },
+  loaded: { label: "Loaded", tamil: "ஏற்றியது", token: "var(--color-brand-primary)" },
+  empty: { label: "Empty", tamil: "காலி", token: "var(--color-text-tertiary)" },
 };

@@ -1,6 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router";
-import { MagnifyingGlass, Warning, X } from "@phosphor-icons/react";
+import {
+  MagnifyingGlass,
+  Warning,
+  X,
+  Factory,
+  CheckCircle,
+  Gear,
+  CircleDashed,
+  CloudSlash,
+  ArrowClockwise,
+  type Icon,
+} from "@phosphor-icons/react";
 import { getBeamSource } from "../../lib/beamSource";
 import {
   BEAM_STATE_META,
@@ -13,28 +23,45 @@ import {
 /* Cyclic order of the lifecycle, drawn clockwise from the top. */
 const CYCLE: BeamState[] = ["vendor", "ready", "loaded", "empty"];
 
+/* Phosphor icon per lifecycle state. */
+const STATE_ICON: Record<BeamState, Icon> = {
+  vendor: Factory,
+  ready: CheckCircle,
+  loaded: Gear,
+  empty: CircleDashed,
+};
+
 export function BeamRegister() {
-  const navigate = useNavigate();
   const [data, setData] = useState<BeamRegisterData | null>(null);
-  const [live, setLive] = useState(false);
+  const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<BeamState>("ready");
   const [query, setQuery] = useState("");
 
-  useEffect(() => {
+  const load = () => {
     let alive = true;
     const src = getBeamSource();
     setLoading(true);
-    src.getBeamRegister().then((d) => {
-      if (!alive) return;
-      setData(d);
-      setLive(src.isLive);
-      setLoading(false);
-    });
+    setError(false);
+    src
+      .getBeamRegister()
+      .then((d) => {
+        if (!alive) return;
+        setData(d);
+        setLoading(false);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setData(null);
+        setError(true);
+        setLoading(false);
+      });
     return () => {
       alive = false;
     };
-  }, []);
+  };
+
+  useEffect(load, []);
 
   const q = query.trim().toLowerCase();
   const searching = q.length > 0;
@@ -61,16 +88,13 @@ export function BeamRegister() {
             </span>
           )}
         </div>
-        {!loading && !live && (
-          <p className="text-[11px] text-[var(--color-status-amber)] mt-0.5">
-            Sample data — live sheet not connected yet
-          </p>
-        )}
       </div>
 
       {loading && <BeamSkeleton />}
 
-      {!loading && data && (
+      {!loading && error && <BeamError onRetry={load} />}
+
+      {!loading && !error && data && (
         <>
           {/* Pictorial lifecycle */}
           <LifecycleDiagram
@@ -133,16 +157,27 @@ export function BeamRegister() {
           )}
         </>
       )}
+    </div>
+  );
+}
 
-      {/* Back to floor */}
-      <div className="px-4 mt-6">
-        <button
-          onClick={() => navigate("/supervisor")}
-          className="w-full h-11 rounded-lg border border-[var(--color-border-hairline)] text-[14px] font-semibold text-[var(--color-text-primary)] hover:bg-gray-50"
-        >
-          Back to looms
-        </button>
-      </div>
+function BeamError({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="px-6 py-16 flex flex-col items-center text-center">
+      <CloudSlash className="w-12 h-12 text-[var(--color-text-tertiary)]" weight="duotone" />
+      <h3 className="mt-4 text-[15px] font-bold text-[var(--color-text-primary)]">
+        Beam data not connected yet
+      </h3>
+      <p className="mt-1.5 text-[13px] text-[var(--color-text-secondary)] leading-relaxed max-w-[260px]">
+        The beam sheet sync is not set up. Beam tracking will appear here once the backend is configured.
+      </p>
+      <button
+        onClick={onRetry}
+        className="mt-5 inline-flex items-center gap-1.5 px-4 h-10 rounded-lg border border-[var(--color-border-hairline)] text-[14px] font-semibold text-[var(--color-text-primary)] hover:bg-gray-50"
+      >
+        <ArrowClockwise className="w-4 h-4" weight="bold" />
+        Retry
+      </button>
     </div>
   );
 }
@@ -211,6 +246,7 @@ function LifecycleDiagram({
         {/* nodes */}
         {CYCLE.map((s) => {
           const meta = BEAM_STATE_META[s];
+          const StateIcon = STATE_ICON[s];
           const isSel = selected === s;
           const isHi = highlight?.has(s) ?? false;
           const isHero = s === "ready";
@@ -234,7 +270,11 @@ function LifecycleDiagram({
                   : "0 1px 3px rgba(0,0,0,0.05)",
               }}
             >
-              <span className="text-[18px] leading-none mb-0.5">{meta.emoji}</span>
+              <StateIcon
+                className="mb-0.5"
+                style={{ color: meta.token, width: 20, height: 20 }}
+                weight={isSel ? "fill" : "duotone"}
+              />
               <span
                 className="text-[22px] font-bold tabular-nums leading-none"
                 style={{ color: meta.token }}
@@ -348,9 +388,10 @@ function SearchResults({ matches, onClear }: { matches: Beam[]; onClear: () => v
 
 function SectionHeader({ state, count }: { state: BeamState; count: number }) {
   const meta = BEAM_STATE_META[state];
+  const StateIcon = STATE_ICON[state];
   return (
     <div className="flex items-center gap-2 mb-2.5 mt-1">
-      <span className="text-[15px]">{meta.emoji}</span>
+      <StateIcon style={{ color: meta.token, width: 16, height: 16 }} weight="fill" />
       <span className="text-[14px] font-bold text-[var(--color-text-primary)]">{meta.label}</span>
       <span
         className="text-[11px] font-bold tabular-nums px-1.5 py-0.5 rounded-full"
@@ -365,6 +406,7 @@ function SectionHeader({ state, count }: { state: BeamState; count: number }) {
 /* ------------------------------ cards ------------------------------ */
 function BeamCard({ beam, showState }: { beam: Beam; showState?: boolean }) {
   const meta = BEAM_STATE_META[beam.state];
+  const StateIcon = STATE_ICON[beam.state];
   return (
     <div
       className="rounded-xl bg-white border px-3.5 py-3 flex items-center justify-between gap-3"
@@ -378,7 +420,8 @@ function BeamCard({ beam, showState }: { beam: Beam; showState?: boolean }) {
               className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full inline-flex items-center gap-1"
               style={{ background: `color-mix(in srgb, ${meta.token} 14%, white)`, color: meta.token }}
             >
-              {meta.emoji} {meta.label}
+              <StateIcon style={{ width: 11, height: 11 }} weight="fill" />
+              {meta.label}
             </span>
           )}
         </div>

@@ -162,27 +162,11 @@ export class GoogleSheetBeamSource implements BeamSource {
 
 /* ------------------------------- factory ------------------------------- */
 /**
- * Returns the live Google source when the backend answers, else falls back to
- * the local sample so the screen is always usable. The fallback is transparent
- * to the UI — only the `isLive` flag differs.
+ * Returns the live Google Sheet source. There is intentionally NO mock
+ * fallback: until the Apps Script `?mode=beams` endpoint is deployed, the
+ * source throws and the UI shows a "not connected" message rather than
+ * misleading sample data.
  */
 export function getBeamSource(): BeamSource {
-  return new ResilientBeamSource();
-}
-
-class ResilientBeamSource implements BeamSource {
-  private readonly live = new GoogleSheetBeamSource();
-  private readonly mock = new MockBeamSource();
-  canEdit = false;
-  isLive = false;
-  async getBeamRegister(): Promise<BeamRegisterData> {
-    try {
-      const data = await this.live.getBeamRegister();
-      this.isLive = true;
-      return data;
-    } catch {
-      this.isLive = false;
-      return this.mock.getBeamRegister();
-    }
-  }
+  return new GoogleSheetBeamSource();
 }
