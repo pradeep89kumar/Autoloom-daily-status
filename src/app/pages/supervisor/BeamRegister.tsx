@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, Fragment } from "react";
 import {
   MagnifyingGlass,
   X,
@@ -8,7 +8,7 @@ import {
   CircleDashed,
   CloudSlash,
   ArrowClockwise,
-  ArrowBendDownLeft,
+  CaretRight,
   SquaresFour,
   type Icon,
 } from "@phosphor-icons/react";
@@ -159,13 +159,12 @@ function BeamError({ onRetry }: { onRetry: () => void }) {
   );
 }
 
-/* -------------------------- looms-first floor -------------------------- */
+/* -------------------------- lifecycle pipeline -------------------------- */
 /**
- * Concept B — the floor at a glance, in three stacked zones, each a filter:
- *   • On the looms  — every loaded beam as a spindle (loom no + design).
- *   • Ready buffer  — the warps staged in SAT, feeding the looms.
- *   • Supply line   — empty (run out) → vendor (re-warping), the refill pipe.
- * Tapping any zone (or its header) filters the list below to that state.
+ * The beam lifecycle as a simple four-stage pipeline, each stage a filter:
+ *   Empty → Warping → Ready → Loaded
+ * An empty beam is sent out to warping, returns ready, is loaded on a loom,
+ * then runs out back to empty. Tapping a stage filters the list below to it.
  */
 function FloorStrip({
   data,
@@ -178,108 +177,34 @@ function FloorStrip({
   highlight: Set<BeamState> | null;
   onSelect: (s: Filter) => void;
 }) {
-  const looms = data.beams.filter((b) => b.state === "loaded").sort(byLoom);
-  const ready = data.beams.filter((b) => b.state === "ready").sort((a, b) => compareBeamId(a.id, b.id));
-  const tokens = BEAM_STATE_META;
+  const stages: BeamState[] = ["empty", "vendor", "ready", "loaded"];
 
   return (
     <div className="px-4 pt-4">
-      {/* zone: on the looms */}
-      <ZoneHeader
-        token={tokens.loaded.token}
-        label="On the looms"
-        count={data.counts.loaded}
-        active={selected === "loaded"}
-        highlighted={highlight?.has("loaded") ?? false}
-        onClick={() => onSelect("loaded")}
-      />
-      <div className="mt-1.5 flex flex-wrap gap-1.5">
-        {looms.length === 0 ? (
-          <Hint>No looms running</Hint>
-        ) : (
-          looms.map((b) => (
-            <button
-              key={b.id}
-              onClick={() => onSelect("loaded")}
-              className="group flex flex-col items-stretch rounded-lg overflow-hidden border bg-white active:scale-[0.97] transition-transform"
-              style={{ borderColor: `color-mix(in srgb, ${tokens.loaded.token} 35%, var(--color-border-hairline))`, minWidth: 52 }}
-            >
-              <span
-                className="text-[10px] font-bold tabular-nums text-center py-0.5 text-white leading-none"
-                style={{ background: tokens.loaded.token }}
-              >
-                {fmtLoom(b.loom)}
-              </span>
-              <span className="text-[10px] font-semibold text-[var(--color-text-primary)] text-center px-1.5 py-1 leading-tight truncate max-w-[88px]">
-                {b.design || "—"}
-              </span>
-            </button>
-          ))
-        )}
-      </div>
-
-      {/* feed arrow */}
-      <div className="flex justify-center my-1.5">
-        <ArrowBendDownLeft className="w-3.5 h-3.5 text-[var(--color-text-tertiary)] rotate-90" weight="bold" />
-      </div>
-
-      {/* zone: ready buffer */}
-      <ZoneHeader
-        token={tokens.ready.token}
-        label="Ready to load"
-        count={ready.length}
-        active={selected === "ready"}
-        highlighted={highlight?.has("ready") ?? false}
-        onClick={() => onSelect("ready")}
-      />
-      <div className="mt-1.5 flex flex-wrap gap-1.5">
-        {ready.length === 0 ? (
-          <Hint>Buffer empty — nothing staged</Hint>
-        ) : (
-          ready.map((b) => (
-            <button
-              key={b.id}
-              onClick={() => onSelect("ready")}
-              className="active:scale-[0.97] transition-transform"
-            >
-              <AssetId id={b.id} rawId={b.rawId} />
-            </button>
-          ))
-        )}
-      </div>
-
-      {/* zone: supply line (empty → vendor) */}
-      <div className="mt-3 flex items-stretch gap-2">
-        <SupplyCell
-          token={tokens.empty.token}
-          icon={STATE_ICON.empty}
-          label="Empty"
-          sub="run out"
-          count={data.counts.empty}
-          active={selected === "empty"}
-          highlighted={highlight?.has("empty") ?? false}
-          onClick={() => onSelect("empty")}
-        />
-        <div className="flex items-center">
-          <ArrowClockwise className="w-3.5 h-3.5 text-[var(--color-text-tertiary)]" weight="bold" />
-        </div>
-        <SupplyCell
-          token={tokens.vendor.token}
-          icon={STATE_ICON.vendor}
-          label="Warping"
-          sub="out at warper"
-          count={data.counts.vendor}
-          active={selected === "vendor"}
-          highlighted={highlight?.has("vendor") ?? false}
-          onClick={() => onSelect("vendor")}
-        />
+      <div className="flex items-stretch gap-0.5">
+        {stages.map((state, i) => (
+          <Fragment key={state}>
+            {i > 0 && (
+              <div className="flex items-center self-center shrink-0">
+                <CaretRight className="w-3 h-3 text-[var(--color-text-tertiary)]" weight="bold" />
+              </div>
+            )}
+            <StageChip
+              state={state}
+              count={data.counts[state]}
+              active={selected === state}
+              highlighted={highlight?.has(state) ?? false}
+              onClick={() => onSelect(state)}
+            />
+          </Fragment>
+        ))}
       </div>
 
       {/* master flat list trigger */}
       <button
         onClick={() => onSelect("all")}
         aria-pressed={selected === "all"}
-        className="mt-3 w-full flex items-center justify-center gap-1.5 h-9 rounded-lg border text-[12px] font-semibold transition-colors active:scale-[0.98]"
+        className="mt-2.5 w-full flex items-center justify-center gap-1.5 h-9 rounded-lg border text-[12px] font-semibold transition-colors active:scale-[0.98]"
         style={{
           borderColor: selected === "all" ? "var(--color-text-primary)" : "var(--color-border-hairline)",
           background: selected === "all" ? "color-mix(in srgb, var(--color-text-primary) 6%, white)" : "white",
@@ -293,82 +218,49 @@ function FloorStrip({
   );
 }
 
-function ZoneHeader({
-  token,
-  label,
+function StageChip({
+  state,
   count,
   active,
   highlighted,
   onClick,
 }: {
-  token: string;
-  label: string;
+  state: BeamState;
   count: number;
   active: boolean;
   highlighted: boolean;
   onClick: () => void;
 }) {
-  return (
-    <button onClick={onClick} aria-pressed={active} className="w-full flex items-center gap-2 group">
-      <span className="w-1 h-3.5 rounded-full" style={{ background: token, opacity: active || highlighted ? 1 : 0.5 }} />
-      <span
-        className="text-[12px] font-bold"
-        style={{ color: active ? token : "var(--color-text-primary)" }}
-      >
-        {label}
-      </span>
-      <span
-        className="text-[10px] font-bold tabular-nums px-1.5 py-0.5 rounded-full"
-        style={{ background: `color-mix(in srgb, ${token} 14%, white)`, color: token }}
-      >
-        {count}
-      </span>
-      {(active || highlighted) && <span className="ml-auto text-[10px] font-semibold" style={{ color: token }}>showing</span>}
-    </button>
-  );
-}
-
-function SupplyCell({
-  token,
-  icon: SupplyIcon,
-  label,
-  sub,
-  count,
-  active,
-  highlighted,
-  onClick,
-}: {
-  token: string;
-  icon: Icon;
-  label: string;
-  sub: string;
-  count: number;
-  active: boolean;
-  highlighted: boolean;
-  onClick: () => void;
-}) {
+  const meta = BEAM_STATE_META[state];
+  const StageIcon = STATE_ICON[state];
   return (
     <button
       onClick={onClick}
       aria-pressed={active}
-      className="flex-1 flex items-center gap-2 rounded-xl border px-3 py-2 transition-colors active:scale-[0.97]"
+      className="flex-1 min-w-0 flex flex-col items-center gap-1 rounded-xl border px-1 py-2.5 transition-colors active:scale-[0.97]"
       style={{
-        borderColor: active || highlighted ? token : "var(--color-border-hairline)",
-        background: active ? `color-mix(in srgb, ${token} 10%, white)` : "white",
-        boxShadow: active ? `inset 0 0 0 1px ${token}` : "none",
+        borderColor: active || highlighted ? meta.token : "var(--color-border-hairline)",
+        background: active ? meta.token : "white",
       }}
     >
-      <SupplyIcon style={{ color: token, width: 16, height: 16 }} weight={active ? "fill" : "duotone"} />
-      <span className="flex flex-col items-start leading-none">
-        <span className="text-[15px] font-bold tabular-nums" style={{ color: token }}>{count}</span>
-        <span className="text-[10px] text-[var(--color-text-secondary)] mt-0.5">{label} · {sub}</span>
+      <StageIcon
+        style={{ color: active ? "white" : meta.token, width: 17, height: 17 }}
+        weight={active ? "fill" : "duotone"}
+      />
+      <span
+        className="text-[18px] font-bold tabular-nums leading-none"
+        style={{ color: active ? "white" : "var(--color-text-primary)" }}
+      >
+        {count}
+      </span>
+      <span
+        className="text-[10px] font-semibold leading-none text-center"
+        style={{ color: active ? "rgba(255,255,255,0.9)" : "var(--color-text-secondary)" }}
+      >
+        {meta.label}
       </span>
     </button>
   );
-}
-
-function Hint({ children }: { children: ReactNode }) {
-  return <span className="text-[11px] text-[var(--color-text-tertiary)] py-1">{children}</span>;
 }
 
 /* ----------------------------- sections ----------------------------- */
@@ -531,34 +423,23 @@ function SectionHeader({ state, count }: { state: BeamState; count: number }) {
 
 /* ------------------------------ cards ------------------------------ */
 /**
- * Asset id as a little ticket stub — a notched left edge (the perforation),
- * monospace id, and a faint origin tint (VVK group vs SAT group) so a physical
- * beam reads as a tracked object wherever it appears, not plain text.
+ * Asset id as a small machined plate — neutral, monospace, with a dot at each
+ * of the four corners like the screws on a luggage tag. The id itself carries
+ * the SAT / VVK prefix; the treatment is identical for every beam.
  */
-function AssetId({ id, rawId }: { id: string; rawId?: string }) {
-  const label = (rawId && rawId.trim()) || id;
-  const isVvk = /^vvk/i.test(id);
-  const tint = isVvk ? "var(--color-brand-primary)" : "var(--color-status-amber)";
+function AssetId({ id }: { id: string }) {
+  const screw =
+    "absolute w-[2.5px] h-[2.5px] rounded-full bg-[var(--color-text-tertiary)]";
   return (
     <span
-      className="relative inline-flex items-center pl-2.5 pr-2 py-0.5 rounded-[5px] text-[11px] font-bold tracking-tight tabular-nums"
-      style={{
-        fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-        background: `color-mix(in srgb, ${tint} 12%, white)`,
-        color: `color-mix(in srgb, ${tint} 65%, var(--color-text-primary))`,
-        border: `1px solid color-mix(in srgb, ${tint} 30%, var(--color-border-hairline))`,
-      }}
+      className="relative inline-flex items-center justify-center px-3 py-1 rounded-[5px] text-[11px] font-bold tracking-tight tabular-nums text-[var(--color-text-primary)] bg-[var(--color-bg-base)] border border-[var(--color-border-hairline)]"
+      style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}
     >
-      {/* perforation notch */}
-      <span
-        className="absolute left-[3px] top-1/2 -translate-y-1/2 flex flex-col gap-[2px]"
-        aria-hidden
-      >
-        <span className="block w-[2px] h-[2px] rounded-full" style={{ background: tint, opacity: 0.55 }} />
-        <span className="block w-[2px] h-[2px] rounded-full" style={{ background: tint, opacity: 0.55 }} />
-        <span className="block w-[2px] h-[2px] rounded-full" style={{ background: tint, opacity: 0.55 }} />
-      </span>
-      {label}
+      <span className={`${screw} left-[3px] top-[3px]`} aria-hidden />
+      <span className={`${screw} right-[3px] top-[3px]`} aria-hidden />
+      <span className={`${screw} left-[3px] bottom-[3px]`} aria-hidden />
+      <span className={`${screw} right-[3px] bottom-[3px]`} aria-hidden />
+      {id}
     </span>
   );
 }
@@ -583,14 +464,14 @@ function BeamCard({ beam, showState }: { beam: Beam; showState?: boolean }) {
               {beam.design || "Running"}
             </div>
             <div className="flex items-center gap-2 mt-1">
-              {hasAssetId && <AssetId id={beam.id} rawId={beam.rawId} />}
+              {hasAssetId && <AssetId id={beam.id} />}
               {showState && <StateBadge meta={meta} StateIcon={StateIcon} />}
             </div>
           </>
         ) : hasAssetId ? (
           <>
             <div className="flex items-center gap-2">
-              <AssetId id={beam.id} rawId={beam.rawId} />
+              <AssetId id={beam.id} />
               {showState && <StateBadge meta={meta} StateIcon={StateIcon} />}
             </div>
             <div className="text-[12px] text-[var(--color-text-secondary)] mt-1 truncate">
