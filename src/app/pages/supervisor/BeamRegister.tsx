@@ -9,6 +9,7 @@ import {
   CloudSlash,
   ArrowClockwise,
   ArrowRight,
+  CaretRight,
   SquaresFour,
   type Icon,
 } from "@phosphor-icons/react";
@@ -108,7 +109,7 @@ export function BeamRegister() {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Find a beam — VVK-4, design, vendor…"
-                className="w-full h-10 pl-9 pr-9 rounded-lg border border-[var(--color-border-hairline)] text-[14px] bg-white focus:outline-none focus:border-[var(--color-text-primary)]"
+                className="w-full h-10 pl-9 pr-9 rounded-full border-0 text-[14px] bg-[var(--color-bg-base)] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-tertiary)] focus:outline-none focus:ring-2 focus:ring-[color-mix(in_srgb,var(--color-brand-primary)_30%,white)] focus:bg-white"
               />
               {searching && (
                 <button
@@ -181,6 +182,23 @@ function FloorStrip({
 
   return (
     <div className="px-4 pt-4">
+      {/* lifecycle header — label left, All-beams browse toggle right */}
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-tertiary)]">
+          Beam lifecycle
+        </span>
+        <button
+          onClick={() => onSelect("all")}
+          aria-pressed={selected === "all"}
+          className="inline-flex items-center gap-1 text-[12px] font-semibold transition-colors active:scale-[0.97]"
+          style={{ color: selected === "all" ? "var(--color-brand-primary)" : "var(--color-text-secondary)" }}
+        >
+          <SquaresFour className="w-3.5 h-3.5" weight={selected === "all" ? "fill" : "regular"} />
+          All {data.total}
+          <CaretRight className="w-3 h-3" weight="bold" />
+        </button>
+      </div>
+
       <div className="flex items-stretch gap-0.5">
         {stages.map((state, i) => (
           <Fragment key={state}>
@@ -199,21 +217,6 @@ function FloorStrip({
           </Fragment>
         ))}
       </div>
-
-      {/* master flat list trigger */}
-      <button
-        onClick={() => onSelect("all")}
-        aria-pressed={selected === "all"}
-        className="mt-2.5 w-full flex items-center justify-center gap-1.5 h-9 rounded-lg border text-[12px] font-semibold transition-colors active:scale-[0.98]"
-        style={{
-          borderColor: selected === "all" ? "var(--color-text-primary)" : "var(--color-border-hairline)",
-          background: selected === "all" ? "color-mix(in srgb, var(--color-text-primary) 6%, white)" : "white",
-          color: "var(--color-text-primary)",
-        }}
-      >
-        <SquaresFour className="w-4 h-4" weight={selected === "all" ? "fill" : "regular"} />
-        All {data.total} beams
-      </button>
     </div>
   );
 }
