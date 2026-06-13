@@ -20,9 +20,6 @@ import {
   type ReadyWarp,
 } from "../../lib/beams";
 
-/* Cyclic order of the lifecycle, drawn clockwise from the top. */
-const CYCLE: BeamState[] = ["vendor", "ready", "loaded", "empty"];
-
 /* Phosphor icon per lifecycle state. */
 const STATE_ICON: Record<BeamState, Icon> = {
   vendor: Factory,
@@ -96,8 +93,9 @@ export function BeamRegister() {
 
       {!loading && !error && data && (
         <>
-          {/* Pictorial lifecycle */}
-          <LifecycleDiagram
+          {/* Buffer-health summary + flow river */}
+          <AmIShort data={data} />
+          <FlowStrip
             data={data}
             selected={selected}
             highlight={searching ? matchedStates : null}
@@ -182,8 +180,89 @@ function BeamError({ onRetry }: { onRetry: () => void }) {
   );
 }
 
-/* ----------------------------- diagram ----------------------------- */
-function LifecycleDiagram({
+/* --------------------------- am I short? --------------------------- */
+/**
+ * Buffer-health summary. The floor question is: do I have enough *ready* beams
+ * to cover the looms currently *running*, so a run-out can be reloaded at once?
+ *   running = loaded · buffer = ready · covered = min(buffer, running)
+ *   short   = running − covered
+ */
+function shortStats(data: BeamRegisterData) {
+  const running = data.counts.loaded;
+  const buffer = data.counts.ready;
+  const covered = Math.min(buffer, running);
+  const short = Math.max(0, running - covered);
+  let tone: "green" | "amber" | "red";
+  if (running === 0 || short === 0) tone = "green";
+  else if (buffer * 2 >= running) tone = "amber";
+  else tone = "red";
+  return { running, buffer, covered, short, tone };
+}
+
+function AmIShort({ data }: { data: BeamRegisterData }) {
+  const { running, buffer, covered, short, tone } = shortStats(data);
+  const token =
+    tone === "green"
+      ? "var(--color-status-green)"
+      : tone === "amber"
+      ? "var(--color-status-amber)"
+      : "var(--color-status-red)";
+
+  const headline =
+    running === 0
+      ? "No looms running"
+      : short === 0
+      ? `Buffer healthy — ${buffer} ready for ${running} running`
+      : tone === "amber"
+      ? `Buffer tight — ${buffer} ready for ${running} running`
+      : `Short by ${short} — only ${buffer} ready for ${running} running`;
+
+  const coveredPct = running > 0 ? (covered / running) * 100 : 100;
+  const shortPct = running > 0 ? (short / running) * 100 : 0;
+
+  return (
+    <div className="px-4 pt-4">
+      <div
+        className="rounded-xl px-3.5 py-3 border"
+        style={{
+          background: `color-mix(in srgb, ${token} 7%, white)`,
+          borderColor: `color-mix(in srgb, ${token} 28%, var(--color-border-hairline))`,
+        }}
+      >
+        <div className="flex items-center gap-1.5">
+          {tone === "green" ? (
+            <CheckCircle style={{ color: token, width: 16, height: 16 }} weight="fill" />
+          ) : (
+            <Warning style={{ color: token, width: 16, height: 16 }} weight="fill" />
+          )}
+          <span className="text-[13px] font-bold" style={{ color: token }}>
+            {headline}
+          </span>
+        </div>
+
+        {/* coverage bar: how much of the running looms a run-out can refill now */}
+        {running > 0 && (
+          <div className="mt-2 flex h-2 rounded-full overflow-hidden bg-black/[0.05]">
+            <div style={{ width: `${coveredPct}%`, background: "var(--color-status-green)" }} />
+            {short > 0 && (
+              <div style={{ width: `${shortPct}%`, background: "var(--color-status-red)" }} />
+            )}
+          </div>
+        )}
+
+        <p className="mt-1.5 text-[12px] text-[var(--color-text-secondary)]">
+          {data.counts.empty} empty to send · {data.counts.vendor} at vendor refilling
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/* ----------------------------- flow river ----------------------------- */
+/** Production order, left → right, with a re-warp return from empty to vendor. */
+const FLOW: BeamState[] = ["vendor", "ready", "loaded", "empty"];
+
+function FlowStrip({
   data,
   selected,
   highlight,
@@ -194,126 +273,141 @@ function LifecycleDiagram({
   highlight: Set<BeamState> | null;
   onSelect: (s: BeamState) => void;
 }) {
-  // Node centres on a circle (viewBox 0..100), clockwise from top.
-  const R = 37;
-  const pos: Record<BeamState, { x: number; y: number }> = {
-    vendor: { x: 50, y: 50 - R },
-    ready: { x: 50 + R, y: 50 },
-    loaded: { x: 50, y: 50 + R },
-    empty: { x: 50 - R, y: 50 },
-  };
-  // Arc connectors between consecutive stations (clockwise).
-  const arcs = CYCLE.map((from, i) => {
-    const to = CYCLE[(i + 1) % CYCLE.length];
-    return arcPath(pos[from], pos[to], R, 13);
+  // viewBox geometry (meet, no distortion). 100 wide × 40 tall.
+  const VB_W = 100;
+  const VB_H = 40;
+  const W = 7; // bar width
+  const YC = 15; // band centre line
+  const MIN_H = 6;
+  const MAX_H = 24;
+  const maxCount = Math.max(...FLOW.map((s) => data.counts[s]), 1);
+
+  const nodes = FLOW.map((s, i) => {
+    const x = (i + 0.5) * (VB_W / FLOW.length);
+    const h = MIN_H + (data.counts[s] / maxCount) * (MAX_H - MIN_H);
+    return { s, x, h, top: YC - h / 2, bot: YC + h / 2 };
   });
 
+  const ribbons = nodes.slice(0, -1).map((n0, i) => {
+    const n1 = nodes[i + 1];
+    return { d: ribbonPath(n0, n1, W), from: n0.s, to: n1.s, key: `${n0.s}-${n1.s}` };
+  });
+
+  // re-warp return loop: empty (last) → vendor (first), arcing below.
+  const last = nodes[nodes.length - 1];
+  const first = nodes[0];
+  const loopY = 33;
+  const loop = `M ${last.x} ${last.bot} C ${last.x} ${loopY}, ${first.x} ${loopY}, ${first.x} ${first.bot}`;
+
   return (
-    <div className="px-4 pt-4">
-      <div className="relative w-full max-w-[330px] mx-auto aspect-square">
-        {/* arrows behind the nodes */}
-        <svg viewBox="0 0 100 100" className="absolute inset-0 w-full h-full">
+    <div className="px-4 pt-3">
+      <div className="relative w-full max-w-[360px] mx-auto">
+        <svg viewBox={`0 0 ${VB_W} ${VB_H}`} className="w-full block">
           <defs>
-            <marker id="bm-arrow" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+            {ribbons.map((r) => (
+              <linearGradient id={`bm-grad-${r.key}`} key={r.key} x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stopColor={BEAM_STATE_META[r.from].token} />
+                <stop offset="100%" stopColor={BEAM_STATE_META[r.to].token} />
+              </linearGradient>
+            ))}
+            <marker id="bm-loop-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto-start-reverse">
               <path d="M0,0 L10,5 L0,10 z" fill="var(--color-text-tertiary)" />
             </marker>
           </defs>
-          {arcs.map((d, i) => (
-            <path
-              key={i}
-              d={d}
-              fill="none"
-              stroke="var(--color-text-tertiary)"
-              strokeWidth={0.9}
-              strokeLinecap="round"
-              markerEnd="url(#bm-arrow)"
-              opacity={0.5}
-            />
+
+          {/* ribbons */}
+          {ribbons.map((r) => (
+            <path key={r.key} d={r.d} fill={`url(#bm-grad-${r.key})`} opacity={0.28} />
           ))}
+
+          {/* re-warp return loop */}
+          <path
+            d={loop}
+            fill="none"
+            stroke="var(--color-text-tertiary)"
+            strokeWidth={0.7}
+            strokeDasharray="1.5 1.5"
+            markerEnd="url(#bm-loop-arrow)"
+            opacity={0.7}
+          />
+          <text x={(first.x + last.x) / 2} y={loopY + 3.2} textAnchor="middle" fontSize={3.2} fill="var(--color-text-tertiary)">
+            re-warp
+          </text>
+
+          {/* node bands */}
+          {nodes.map((n) => {
+            const meta = BEAM_STATE_META[n.s];
+            const isSel = selected === n.s;
+            const isHi = highlight?.has(n.s) ?? false;
+            return (
+              <g key={n.s}>
+                {(isSel || isHi) && (
+                  <rect
+                    x={n.x - W / 2 - 1.2}
+                    y={n.top - 1.2}
+                    width={W + 2.4}
+                    height={n.h + 2.4}
+                    rx={3}
+                    fill="none"
+                    stroke={meta.token}
+                    strokeWidth={isHi ? 1.1 : 0.8}
+                    opacity={isHi ? 0.9 : 0.6}
+                  />
+                )}
+                <rect x={n.x - W / 2} y={n.top} width={W} height={n.h} rx={2.2} fill={meta.token} opacity={isSel ? 1 : 0.85} />
+              </g>
+            );
+          })}
         </svg>
 
-        {/* centre label */}
-        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none">
-          <div className="text-[10px] uppercase tracking-wide text-[var(--color-text-tertiary)] leading-tight">
-            lifecycle
-          </div>
-          <div className="text-[20px] font-bold tabular-nums text-[var(--color-text-primary)] leading-tight">
-            {data.total}
-          </div>
-          <div className="text-[10px] text-[var(--color-text-tertiary)] leading-tight">beams</div>
-        </div>
-
-        {/* nodes */}
-        {CYCLE.map((s) => {
-          const meta = BEAM_STATE_META[s];
-          const StateIcon = STATE_ICON[s];
-          const isSel = selected === s;
-          const isHi = highlight?.has(s) ?? false;
-          const isHero = s === "ready";
-          const size = isHero ? 92 : 84;
-          return (
-            <button
-              key={s}
-              onClick={() => onSelect(s)}
-              className="absolute -translate-x-1/2 -translate-y-1/2 rounded-2xl flex flex-col items-center justify-center transition-all"
-              style={{
-                left: `${pos[s].x}%`,
-                top: `${pos[s].y}%`,
-                width: size,
-                height: size,
-                background: isSel ? `color-mix(in srgb, ${meta.token} 12%, white)` : "white",
-                border: `2px solid ${isSel || isHi ? meta.token : "var(--color-border-hairline)"}`,
-                boxShadow: isHi
-                  ? `0 0 0 3px color-mix(in srgb, ${meta.token} 35%, transparent)`
-                  : isSel
-                  ? "0 2px 8px rgba(0,0,0,0.08)"
-                  : "0 1px 3px rgba(0,0,0,0.05)",
-              }}
-            >
-              <StateIcon
-                className="mb-0.5"
-                style={{ color: meta.token, width: 20, height: 20 }}
-                weight={isSel ? "fill" : "duotone"}
-              />
-              <span
-                className="text-[22px] font-bold tabular-nums leading-none"
-                style={{ color: meta.token }}
+        {/* tap targets + labels */}
+        <div className="grid grid-cols-4 mt-1.5">
+          {nodes.map((n) => {
+            const meta = BEAM_STATE_META[n.s];
+            const StateIcon = STATE_ICON[n.s];
+            const isSel = selected === n.s;
+            return (
+              <button
+                key={n.s}
+                onClick={() => onSelect(n.s)}
+                className="flex flex-col items-center gap-0.5 py-1 rounded-lg"
+                style={{ background: isSel ? `color-mix(in srgb, ${meta.token} 9%, transparent)` : "transparent" }}
               >
-                {data.counts[s]}
-              </span>
-              <span className="text-[10px] font-medium text-[var(--color-text-secondary)] mt-0.5 leading-tight">
-                {meta.label}
-              </span>
-            </button>
-          );
-        })}
+                <div className="flex items-center gap-1">
+                  <StateIcon style={{ color: meta.token, width: 13, height: 13 }} weight={isSel ? "fill" : "duotone"} />
+                  <span className="text-[16px] font-bold tabular-nums leading-none" style={{ color: meta.token }}>
+                    {data.counts[n.s]}
+                  </span>
+                </div>
+                <span className={`text-[10px] leading-tight ${isSel ? "font-semibold text-[var(--color-text-primary)]" : "text-[var(--color-text-secondary)]"}`}>
+                  {meta.label}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
 }
 
-/** SVG arc between two points on a circle of radius R about (50,50), trimmed by
- *  `gapDeg` at each end so it doesn't overlap the nodes; arrowhead at the end. */
-function arcPath(
-  a: { x: number; y: number },
-  b: { x: number; y: number },
-  R: number,
-  gapDeg: number,
+/** Tapering filled ribbon connecting the right edge of one band to the left
+ *  edge of the next, following each band's height. */
+function ribbonPath(
+  n0: { x: number; top: number; bot: number },
+  n1: { x: number; top: number; bot: number },
+  w: number,
 ): string {
-  const ang = (p: { x: number; y: number }) => Math.atan2(p.y - 50, p.x - 50);
-  let a0 = ang(a);
-  let a1 = ang(b);
-  // ensure clockwise (increasing angle in SVG's y-down space)
-  if (a1 < a0) a1 += Math.PI * 2;
-  const g = (gapDeg * Math.PI) / 180;
-  const s = a0 + g;
-  const e = a1 - g;
-  const r = R - 3;
-  const sx = 50 + r * Math.cos(s);
-  const sy = 50 + r * Math.sin(s);
-  const ex = 50 + r * Math.cos(e);
-  const ey = 50 + r * Math.sin(e);
-  return `M ${sx.toFixed(2)} ${sy.toFixed(2)} A ${r} ${r} 0 0 1 ${ex.toFixed(2)} ${ey.toFixed(2)}`;
+  const x0 = n0.x + w / 2;
+  const x1 = n1.x - w / 2;
+  const cx = (x0 + x1) / 2;
+  return [
+    `M ${x0.toFixed(2)} ${n0.top.toFixed(2)}`,
+    `C ${cx.toFixed(2)} ${n0.top.toFixed(2)}, ${cx.toFixed(2)} ${n1.top.toFixed(2)}, ${x1.toFixed(2)} ${n1.top.toFixed(2)}`,
+    `L ${x1.toFixed(2)} ${n1.bot.toFixed(2)}`,
+    `C ${cx.toFixed(2)} ${n1.bot.toFixed(2)}, ${cx.toFixed(2)} ${n0.bot.toFixed(2)}, ${x0.toFixed(2)} ${n0.bot.toFixed(2)}`,
+    "Z",
+  ].join(" ");
 }
 
 /* ----------------------------- sections ----------------------------- */
