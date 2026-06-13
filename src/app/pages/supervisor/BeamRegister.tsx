@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   MagnifyingGlass,
-  Warning,
   X,
   Factory,
   CheckCircle,
@@ -123,21 +122,6 @@ export function BeamRegister() {
             </div>
           </div>
 
-          {/* Integrity note — ready-warp reconciliation only */}
-          {!data.integrity.ok && !searching && selected === "ready" && (
-            <div className="mx-4 mb-3 rounded-lg bg-[color-mix(in_srgb,var(--color-status-amber)_8%,white)] border border-[color-mix(in_srgb,var(--color-status-amber)_30%,white)] px-3 py-2.5">
-              <div className="flex items-center gap-1.5 text-[12px] font-semibold text-[var(--color-status-amber)] mb-1">
-                <Warning className="w-4 h-4" weight="fill" />
-                Sheet data gap
-              </div>
-              {data.integrity.notes.map((n, i) => (
-                <p key={i} className="text-[12px] text-[var(--color-text-secondary)] leading-relaxed">
-                  {n}
-                </p>
-              ))}
-            </div>
-          )}
-
           {/* List area */}
           {searching ? (
             <SearchResults matches={matches} onClear={() => setQuery("")} />
@@ -195,7 +179,7 @@ function FloorStrip({
   onSelect: (s: Filter) => void;
 }) {
   const looms = data.beams.filter((b) => b.state === "loaded").sort(byLoom);
-  const ready = data.readyWarps;
+  const ready = data.beams.filter((b) => b.state === "ready").sort((a, b) => compareBeamId(a.id, b.id));
   const tokens = BEAM_STATE_META;
 
   return (
@@ -242,7 +226,7 @@ function FloorStrip({
       {/* zone: ready buffer */}
       <ZoneHeader
         token={tokens.ready.token}
-        label="Ready buffer"
+        label="Ready to load"
         count={ready.length}
         active={selected === "ready"}
         highlighted={highlight?.has("ready") ?? false}
@@ -252,21 +236,13 @@ function FloorStrip({
         {ready.length === 0 ? (
           <Hint>Buffer empty — nothing staged</Hint>
         ) : (
-          ready.map((w, i) => (
+          ready.map((b) => (
             <button
-              key={i}
+              key={b.id}
               onClick={() => onSelect("ready")}
-              className="rounded-lg border px-2 py-1.5 active:scale-[0.97] transition-transform"
-              style={{ background: `color-mix(in srgb, ${tokens.ready.token} 9%, white)`, borderColor: `color-mix(in srgb, ${tokens.ready.token} 35%, var(--color-border-hairline))` }}
+              className="active:scale-[0.97] transition-transform"
             >
-              <span className="block text-[10px] font-semibold text-[var(--color-text-primary)] leading-tight truncate max-w-[96px]">
-                {w.design}
-              </span>
-              {w.meters != null && (
-                <span className="block text-[9px] tabular-nums text-[var(--color-text-secondary)] leading-none mt-0.5">
-                  {w.meters} m
-                </span>
-              )}
+              <AssetId id={b.id} rawId={b.rawId} />
             </button>
           ))
         )}
@@ -290,8 +266,8 @@ function FloorStrip({
         <SupplyCell
           token={tokens.vendor.token}
           icon={STATE_ICON.vendor}
-          label="At vendor"
-          sub="re-warping"
+          label="Warping"
+          sub="out at warper"
           count={data.counts.vendor}
           active={selected === "vendor"}
           highlighted={highlight?.has("vendor") ?? false}
@@ -434,17 +410,50 @@ function byLoom(a: Beam, b: Beam): number {
 }
 
 function ReadySection({ data }: { data: BeamRegisterData }) {
+  const ready = data.beams
+    .filter((b) => b.state === "ready")
+    .sort((a, b) => compareBeamId(a.id, b.id));
   const warps = data.readyWarps;
   return (
     <div className="px-4">
-      <SectionHeader state="ready" count={warps.length} />
-      {warps.length === 0 ? (
-        <Empty label="No warps ready to load" />
+      <SectionHeader state="ready" count={ready.length} />
+
+      {/* Derivation note — how the ready list is arrived at. */}
+      <div className="mb-3 rounded-lg bg-[color-mix(in_srgb,var(--color-status-green)_7%,white)] border border-[color-mix(in_srgb,var(--color-status-green)_28%,white)] px-3 py-2.5">
+        <p className="text-[12px] text-[var(--color-text-secondary)] leading-relaxed">
+          Ready to load is derived from the master list: any beam in SAT that is not
+          loaded on a loom, empty, or out warping. These assets are available to take
+          the next warp.
+        </p>
+      </div>
+
+      {ready.length === 0 ? (
+        <Empty label="No beams ready to load" />
       ) : (
         <div className="flex flex-col gap-2">
-          {warps.map((w, i) => (
-            <ReadyWarpCard key={i} warp={w} />
+          {ready.map((b) => (
+            <BeamCard key={b.id} beam={b} />
           ))}
+        </div>
+      )}
+
+      {/* Staged warps — warps wound in SAT with no beam id recorded yet. */}
+      {warps.length > 0 && (
+        <div className="mt-5">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-[13px] font-bold text-[var(--color-text-primary)]">Warps staged in SAT</span>
+            <span className="text-[11px] font-bold tabular-nums px-1.5 py-0.5 rounded-full bg-[var(--color-bg-base)] text-[var(--color-text-secondary)]">
+              {warps.length}
+            </span>
+          </div>
+          <p className="text-[12px] text-[var(--color-text-tertiary)] leading-relaxed mb-2">
+            Warps wound and waiting in SAT. The sheet records no beam id for these yet.
+          </p>
+          <div className="flex flex-col gap-2">
+            {warps.map((w, i) => (
+              <ReadyWarpCard key={i} warp={w} />
+            ))}
+          </div>
         </div>
       )}
     </div>

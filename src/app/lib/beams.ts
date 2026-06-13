@@ -114,14 +114,22 @@ function titleCaseVendor(v: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
 }
 
+/** True when a master "BEAM AT" value denotes our own premises (not a warping location). */
+function isInSat(location: string): boolean {
+  return /^\s*in\s*sat\s*$/i.test(String(location ?? ""));
+}
+
 /**
- * Collapse the four sheet tables into one canonical beam list. Each lifecycle
- * state is read strictly from its own explicit table — we follow the sheet as
- * maintained and never infer a beam's state from the master location list:
- *   1. Loaded table   → loaded
- *   2. OUT SIDE table  → vendor
- *   3. EMPTY BEAM list → empty
- *   4. READY warp list → ready  (the sheet records no beam id for these)
+ * Collapse the sheet tables into one canonical beam list. The MASTER list
+ * ("BEAM NO · BEAM AT") is the full universe of assets and the authoritative
+ * per-beam location; the role tables (loaded / empty / warping) say what a
+ * beam is doing. Resolution, most-specific first:
+ *   1. Loaded table          → loaded   (in SAT, on a loom)
+ *   2. EMPTY BEAM list       → empty    (in SAT, run out)
+ *   3. master location ≠ SAT → warping  (out at a warping location, e.g. Theivamani)
+ *   4. master, in SAT, idle  → ready    (every asset not loaded / empty / warping)
+ * The READY warp table (designs wound, no beam id recorded) is kept separately
+ * for display as staged warps.
  */
 export function normalizeBeams(data: BeamSheetData): BeamRegisterData {
   const beams = new Map<string, Beam>();
@@ -156,21 +164,7 @@ export function normalizeBeams(data: BeamSheetData): BeamRegisterData {
     });
   }
 
-  // 2. Vendor — explicit OUT SIDE table.
-  for (const r of data.vendor) {
-    const id = canonicalBeamId(r.beamNo);
-    if (!id || beams.has(id)) continue;
-    const vendor = titleCaseVendor(r.vendor);
-    claim(id, r.beamNo, {
-      id,
-      rawId: String(r.beamNo).trim(),
-      state: "vendor",
-      location: vendor || "Vendor",
-      vendor: vendor || undefined,
-    });
-  }
-
-  // 3. Empty — explicit EMPTY BEAM list.
+  // 2. Empty — explicit EMPTY BEAM list (in SAT, run out).
   for (const r of data.empty) {
     const id = canonicalBeamId(r.beamNo);
     if (!id || beams.has(id)) continue;
@@ -182,9 +176,57 @@ export function normalizeBeams(data: BeamSheetData): BeamRegisterData {
     });
   }
 
-  // 4. Ready — straight from the READY (LOAD WARP IN SAT) table. The sheet
-  // does not record a physical beam id for a ready warp, so each warp becomes a
-  // ready beam keyed by its beam id when known, else by its design.
+  // 3 + 4. Resolve every remaining asset from the MASTER list.
+  //   • BEAM AT ≠ "in SAT"  → warping (out at a warping location)
+  //   • BEAM AT = "in SAT"  → ready   (idle in SAT, not loaded/empty)
+  // The OUT SIDE table enriches the warping location name when present.
+  const warpName = new Map<string, string>();
+  for (const r of data.vendor) {
+    const id = canonicalBeamId(r.beamNo);
+    if (id) warpName.set(id, titleCaseVendor(r.vendor));
+  }
+
+  for (const r of data.master) {
+    const id = canonicalBeamId(r.beamNo);
+    if (!id || beams.has(id)) continue;
+    const warping = !isInSat(r.location) || warpName.has(id);
+    if (warping) {
+      const name =
+        (!isInSat(r.location) ? titleCaseVendor(r.location) : "") || warpName.get(id) || "Warping";
+      claim(id, r.beamNo, {
+        id,
+        rawId: String(r.beamNo).trim(),
+        state: "vendor",
+        location: name,
+        vendor: name,
+      });
+    } else {
+      claim(id, r.beamNo, {
+        id,
+        rawId: String(r.beamNo).trim(),
+        state: "ready",
+        location: IN_SAT,
+        inferred: true,
+      });
+    }
+  }
+
+  // Fold in any OUT SIDE-table beams that the master list omitted.
+  for (const r of data.vendor) {
+    const id = canonicalBeamId(r.beamNo);
+    if (!id || beams.has(id)) continue;
+    const name = titleCaseVendor(r.vendor) || "Warping";
+    claim(id, r.beamNo, {
+      id,
+      rawId: String(r.beamNo).trim(),
+      state: "vendor",
+      location: name,
+      vendor: name,
+    });
+  }
+
+  // Staged warps (LOAD WARP IN SAT): designs wound and waiting, with no beam id
+  // recorded in the sheet. Kept for display alongside the ready asset list.
   const readyWarps: ReadyWarp[] = data.ready
     .map((r) => ({
       design: String(r.design || "").trim(),
@@ -193,29 +235,11 @@ export function normalizeBeams(data: BeamSheetData): BeamRegisterData {
     }))
     .filter((w) => w.design);
 
-  readyWarps.forEach((w, i) => {
-    const base = w.beamId || w.design || `Ready ${i + 1}`;
-    let id = base;
-    let n = 2;
-    while (beams.has(id)) id = `${base} (${n++})`;
-    beams.set(id, {
-      id,
-      rawId: w.beamId || "",
-      state: "ready",
-      location: IN_SAT,
-      design: w.design || undefined,
-      meters: w.meters,
-      inferred: !w.beamId,
-    });
-  });
-
   const counts: Record<BeamState, number> = { vendor: 0, ready: 0, loaded: 0, empty: 0 };
   for (const b of beams.values()) counts[b.state] += 1;
 
   const readyBeamCount = counts.ready;
   const readyWarpCount = readyWarps.length;
-  const unmappedWarps = 0;
-  const unaccountedBeams = 0;
   const notes: string[] = [];
 
   const sorted = [...beams.values()].sort((a, b) => compareBeamId(a.id, b.id));
@@ -226,11 +250,11 @@ export function normalizeBeams(data: BeamSheetData): BeamRegisterData {
     counts,
     total: sorted.length,
     integrity: {
-      ok: unmappedWarps === 0 && unaccountedBeams === 0,
+      ok: true,
       readyBeamCount,
       readyWarpCount,
-      unmappedWarps,
-      unaccountedBeams,
+      unmappedWarps: 0,
+      unaccountedBeams: 0,
       notes,
     },
   };
@@ -251,7 +275,7 @@ export const BEAM_STATE_META: Record<
   BeamState,
   { label: string; tamil: string; token: string }
 > = {
-  vendor: { label: "At vendor", tamil: "வார்ப்பிங்", token: "var(--color-status-amber)" },
+  vendor: { label: "Warping", tamil: "வார்ப்பிங்", token: "var(--color-status-amber)" },
   ready: { label: "Ready", tamil: "தயார்", token: "var(--color-status-green)" },
   loaded: { label: "Loaded", tamil: "ஏற்றியது", token: "var(--color-brand-primary)" },
   empty: { label: "Empty", tamil: "காலி", token: "var(--color-text-tertiary)" },

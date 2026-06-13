@@ -921,20 +921,28 @@ function _readBeams() {
       }
     }
 
-    // Master list — scan for "<beam id> | <location>" pairs anywhere in the grid.
+    // Master list — the full universe of assets, headed "BEAM NO · BEAM AT".
+    // Anchor on the "BEAM AT" column (unique to this table) and take the
+    // "Beam NO" column immediately to its left, so the side-by-side S.NO
+    // columns of the other tables are never misread as beam ids.
     var master = [];
-    var seen = {};
-    for (var mr = 0; mr < g.length; mr++) {
-      for (var mc = 0; mc + 1 < g[mr].length; mc++) {
-        var left = norm(g[mr][mc]);
-        var right = norm(g[mr][mc + 1]);
-        if (!isBeamId(left) || !right) continue;
-        var locOk = isInSat(right) || /^[A-Za-z][A-Za-z .'\-]{1,24}$/.test(right);
-        if (!locOk) continue;
-        var key = left.toLowerCase();
-        if (seen[key]) continue;
-        seen[key] = true;
-        master.push({ beamNo: left, location: right });
+    var hmst = findHeader({ at: /^beam\s*at$/ });
+    if (hmst) {
+      var mbeam = -1;
+      for (var mc = hmst.cols.at - 1; mc >= 0; mc--) {
+        if (/^beam\s*no$/.test(low(g[hmst.row][mc]))) { mbeam = mc; break; }
+      }
+      if (mbeam >= 0) {
+        for (var mr = hmst.row + 1; mr < g.length; mr++) {
+          var mb = norm(g[mr][mbeam]);
+          var ml = norm(g[mr][hmst.cols.at]);
+          if (!mb && !ml) {
+            var nb = norm(g[mr + 1] ? g[mr + 1][mbeam] : "");
+            if (!nb) break; else continue;
+          }
+          if (!mb) continue;
+          master.push({ beamNo: mb, location: ml });
+        }
       }
     }
 
