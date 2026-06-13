@@ -131,7 +131,11 @@ export function BeamRegister() {
           ) : selected === "ready" ? (
             <ReadySection data={data} />
           ) : (
-            <StationSection state={selected} beams={data.beams.filter((b) => b.state === selected)} />
+            <StationSection
+              state={selected}
+              beams={data.beams.filter((b) => b.state === selected)}
+              onVendorTap={(v) => setQuery(v)}
+            />
           )}
         </>
       )}
@@ -267,7 +271,15 @@ function StageChip({
 }
 
 /* ----------------------------- sections ----------------------------- */
-function StationSection({ state, beams }: { state: BeamState; beams: Beam[] }) {
+function StationSection({
+  state,
+  beams,
+  onVendorTap,
+}: {
+  state: BeamState;
+  beams: Beam[];
+  onVendorTap?: (vendor: string) => void;
+}) {
   const meta = BEAM_STATE_META[state];
   // Looms run in number order — list loaded beams in loom sequence.
   const ordered = state === "loaded" ? [...beams].sort(byLoom) : beams;
@@ -279,7 +291,7 @@ function StationSection({ state, beams }: { state: BeamState; beams: Beam[] }) {
       ) : (
         <div className="flex flex-col gap-2">
           {ordered.map((b) => (
-            <BeamCard key={b.id} beam={b} />
+            <BeamCard key={b.id} beam={b} onVendorTap={onVendorTap} />
           ))}
         </div>
       )}
@@ -452,7 +464,7 @@ function AssetId({ id }: { id: string }) {
   );
 }
 
-function BeamCard({ beam, showState }: { beam: Beam; showState?: boolean }) {
+function BeamCard({ beam, showState, onVendorTap }: { beam: Beam; showState?: boolean; onVendorTap?: (vendor: string) => void }) {
   const meta = BEAM_STATE_META[beam.state];
   const StateIcon = STATE_ICON[beam.state];
   const isLoaded = beam.state === "loaded";
@@ -505,8 +517,18 @@ function BeamCard({ beam, showState }: { beam: Beam; showState?: boolean }) {
         {isLoaded && beam.loom && (
           <span className="text-[13px] font-bold text-[var(--color-brand-primary)] tabular-nums">{fmtLoom(beam.loom)}</span>
         )}
-        {beam.state === "vendor" && (
-          <span className="text-[12px] font-semibold text-[var(--color-status-amber)]">{beam.vendor}</span>
+        {beam.state === "vendor" && beam.vendor && (
+          onVendorTap ? (
+            <button
+              onClick={() => onVendorTap(beam.vendor!)}
+              className="inline-flex items-center gap-0.5 text-[13px] font-bold text-[var(--color-status-amber)] underline decoration-dotted underline-offset-2 active:scale-[0.97] transition-transform"
+            >
+              {beam.vendor}
+              <CaretRight className="w-3 h-3" weight="bold" />
+            </button>
+          ) : (
+            <span className="text-[13px] font-bold text-[var(--color-status-amber)]">{beam.vendor}</span>
+          )
         )}
         {beam.meters != null && (
           <div className="text-[12px] text-[var(--color-text-secondary)] tabular-nums">{beam.meters} m</div>
