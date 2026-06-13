@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate } from "react-router";
-import { Calendar, TrendingUp, Wallet, IndianRupee, ArrowLeft } from "lucide-react";
+import { CalendarBlank, TrendUp, Wallet, CurrencyInr, ArrowLeft, type Icon } from "@phosphor-icons/react";
 import { setRole } from "../../lib/persona";
 
 export function PartnerShell() {
@@ -18,7 +18,7 @@ export function PartnerShell() {
           className="p-2 -ml-2 mr-2 text-[var(--color-text-primary)]"
           aria-label="Exit Partner"
         >
-          <ArrowLeft className="w-5 h-5" strokeWidth={1.5} />
+          <ArrowLeft className="w-5 h-5" weight="bold" />
         </button>
         <h1 className="text-base font-semibold">Partner</h1>
       </header>
@@ -31,9 +31,9 @@ export function PartnerShell() {
         className="bg-white border-t border-[var(--color-border-hairline)] grid grid-cols-4 shrink-0"
         style={{ paddingBottom: "env(safe-area-inset-bottom)", height: "calc(4rem + env(safe-area-inset-bottom))" }}
       >
-        <TabLink to="/partner/day" label="Day" Icon={Calendar} />
-        <TabLink to="/partner/cash" label="Cash" Icon={IndianRupee} />
-        <TabLink to="/partner/trend" label="Trend" Icon={TrendingUp} />
+        <TabLink to="/partner/day" label="Day" Icon={CalendarBlank} />
+        <TabLink to="/partner/cash" label="Cash" Icon={CurrencyInr} />
+        <TabLink to="/partner/trend" label="Trend" Icon={TrendUp} />
         <TabLink to="/partner/receivables" label="Receivables" Icon={Wallet} />
       </nav>
     </div>
@@ -47,7 +47,7 @@ function TabLink({
 }: {
   to: string;
   label: string;
-  Icon: typeof Calendar;
+  Icon: Icon;
 }) {
   return (
     <NavLink
@@ -65,7 +65,7 @@ function TabLink({
           {isActive ? (
             <span className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-[3px] rounded-b-full bg-[var(--color-text-primary)]" />
           ) : null}
-          <Icon className="w-5 h-5" strokeWidth={isActive ? 2.25 : 1.5} />
+          <Icon className="w-[22px] h-[22px]" weight={isActive ? "fill" : "regular"} />
           <span>{label}</span>
         </>
       )}

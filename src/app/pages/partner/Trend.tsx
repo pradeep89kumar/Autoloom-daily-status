@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { TrendUp, TrendDown, ArrowRight, CaretDown } from "@phosphor-icons/react";
 import { fetchMasterRange, type MasterRangeRow } from "../../lib/sheetSync";
 import { LOOM_CATALOG, isNewLoom } from "../../lib/looms";
 import { NewPill } from "../../components/NewPill";
@@ -576,7 +577,22 @@ function MonthTargetCard({
         </span>
         {momentum ? (
           <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[12px] font-semibold ${trajectoryTone.soft} ${trajectoryTone.text}`}>
-            {momentum.dir === "up" ? "↑ முன்னேற்றம்" : momentum.dir === "down" ? "↓ குறைவு" : "→ நிலையானது"}
+            {momentum.dir === "up" ? (
+              <>
+                <TrendUp className="w-3.5 h-3.5" weight="bold" />
+                முன்னேற்றம்
+              </>
+            ) : momentum.dir === "down" ? (
+              <>
+                <TrendDown className="w-3.5 h-3.5" weight="bold" />
+                குறைவு
+              </>
+            ) : (
+              <>
+                <ArrowRight className="w-3.5 h-3.5" weight="bold" />
+                நிலையானது
+              </>
+            )}
           </span>
         ) : null}
       </div>
@@ -712,15 +728,10 @@ function joinLooms(looms: string[]): string {
 
 function Chevron({ open }: { open: boolean }) {
   return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 16 16"
-      fill="none"
-      className={`text-[var(--color-text-secondary)] transition-transform ${open ? "rotate-180" : ""}`}
-    >
-      <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
+    <CaretDown
+      className={`w-4 h-4 text-[var(--color-text-secondary)] transition-transform ${open ? "rotate-180" : ""}`}
+      weight="bold"
+    />
   );
 }
 

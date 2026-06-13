@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
-import { AlertCircle, Check, Clock } from "lucide-react";
+import { WarningCircle, Check, Clock, CaretRight } from "@phosphor-icons/react";
 import { LOOM_CATALOG, isNewLoom } from "../../lib/looms";
 import { NewPill } from "../../components/NewPill";
 import { fetchRecentRows, type CapturedRow } from "../../lib/sheetSync";
@@ -118,7 +118,7 @@ export function PendingList() {
                       <span className="flex-1 text-sm text-[var(--color-text-secondary)] flex items-center gap-2">
                         {isLogged ? (
                           <span className="inline-flex items-center gap-1 text-[var(--color-status-green)]">
-                            <Check className="w-3.5 h-3.5" strokeWidth={2.25} /> Logged
+                            <Check className="w-3.5 h-3.5" weight="bold" /> Logged
                           </span>
                         ) : (
                           <span>Enter production</span>
@@ -129,7 +129,7 @@ export function PendingList() {
                           </span>
                         )}
                       </span>
-                      {!disabled && <span className="text-[var(--color-text-secondary)] text-sm">›</span>}
+                      {!disabled && <CaretRight className="w-4 h-4 text-[var(--color-text-secondary)]" weight="bold" />}
                     </button>
                   </li>
                 );
@@ -146,13 +146,13 @@ function StatusChip({ status }: { status: "pending" | "late" }) {
   if (status === "late") {
     return (
       <span className="inline-flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide text-[var(--color-status-red)]">
-        <AlertCircle className="w-3 h-3" strokeWidth={2} /> Late
+        <WarningCircle className="w-3 h-3" weight="fill" /> Late
       </span>
     );
   }
   return (
     <span className="inline-flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide text-[var(--color-text-secondary)]">
-      <Clock className="w-3 h-3" strokeWidth={2} /> Pending
+      <Clock className="w-3 h-3" weight="duotone" /> Pending
     </span>
   );
 }

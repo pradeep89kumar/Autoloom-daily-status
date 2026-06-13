@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
-import { AlertCircle, Check, Clock, Users } from "lucide-react";
+import { WarningCircle, Check, Clock, Users } from "@phosphor-icons/react";
 import { LOOM_CATALOG, isNewLoom } from "../../lib/looms";
 import { NewPill } from "../../components/NewPill";
 
@@ -160,7 +160,7 @@ export function LoomFloor() {
           onClick={() => navigate("/role")}
           className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[var(--color-border-hairline)] text-sm hover:bg-gray-50"
         >
-          <Users className="w-4 h-4" strokeWidth={1.6} />
+          <Users className="w-4 h-4" weight="bold" />
           Switch
         </button>
         <button
@@ -264,7 +264,7 @@ export function LoomFloor() {
                   <span className="inline-flex items-center gap-1">
                     {l.name}
                     {isNewLoom(l.id) && <NewPill />}
-                    {logged && <Check className="w-3.5 h-3.5" strokeWidth={2.25} />}
+                    {logged && <Check className="w-3.5 h-3.5" weight="bold" />}
                   </span>
                   {logged && (
                     <span className="block text-[10px] mt-0.5 font-medium">Logged</span>
@@ -306,9 +306,9 @@ export function LoomFloor() {
               }`}
             >
               {s.status === "late" ? (
-                <AlertCircle className="w-4 h-4 text-[var(--color-status-red)] shrink-0" strokeWidth={1.5} />
+                <WarningCircle className="w-4 h-4 text-[var(--color-status-red)] shrink-0" weight="fill" />
               ) : (
-                <Clock className="w-4 h-4 text-[var(--color-text-secondary)] shrink-0" strokeWidth={1.5} />
+                <Clock className="w-4 h-4 text-[var(--color-text-secondary)] shrink-0" weight="duotone" />
               )}
               <span className="flex-1 text-sm">
                 <span className={`font-semibold ${s.status === "late" ? "text-[var(--color-status-red)]" : ""}`}>

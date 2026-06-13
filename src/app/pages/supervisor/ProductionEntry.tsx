@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
-import { AlertCircle, Check, ChevronDown, ChevronLeft, ChevronRight, Lock, Plus, X } from "lucide-react";
+import { WarningCircle, Check, CaretDown, CaretLeft, CaretRight, Lock, Plus, X } from "@phosphor-icons/react";
 import { Button } from "../../components/ui/button";
 import { showToast } from "../../components/Toast";
 import {
@@ -330,7 +330,7 @@ export function ProductionEntry() {
         )}
         {locked && (
           <div className="mb-2 flex items-center gap-2 px-3 py-2 rounded-lg border border-[var(--color-border-hairline)] bg-gray-50 text-[12px] text-[var(--color-text-secondary)]">
-            <Lock className="w-3.5 h-3.5" strokeWidth={1.5} />
+            <Lock className="w-3.5 h-3.5" weight="fill" />
             <span>Edit window closed. Update directly on Google Sheet.</span>
           </div>
         )}
@@ -351,7 +351,7 @@ export function ProductionEntry() {
         {needsLoading && (
           <div className="mt-3 p-3 rounded-lg border border-[var(--color-status-red)] bg-[color-mix(in_srgb,var(--color-status-red)_6%,white)]">
             <div className="flex items-start gap-2">
-              <AlertCircle className="w-4 h-4 text-[var(--color-status-red)] shrink-0 mt-0.5" strokeWidth={1.75} />
+              <WarningCircle className="w-4 h-4 text-[var(--color-status-red)] shrink-0 mt-0.5" weight="fill" />
               <div className="flex-1">
                 <p className="text-[13px] font-semibold text-[var(--color-status-red)]">
                   Loading completed
@@ -417,7 +417,7 @@ export function ProductionEntry() {
               <span className={weaver ? "" : "text-[var(--color-text-secondary)]"}>
                 {weaver || "Select weaver"}
               </span>
-              <ChevronDown className="w-4 h-4 text-[var(--color-text-secondary)]" strokeWidth={1.5} />
+              <CaretDown className="w-4 h-4 text-[var(--color-text-secondary)]" weight="bold" />
             </button>
             {weaverOpen && (
               <ul
@@ -432,7 +432,7 @@ export function ProductionEntry() {
                       className="w-full text-left px-3 py-2.5 text-[15px] hover:bg-gray-50 flex items-center justify-between"
                     >
                       <span>{w}</span>
-                      {weaver === w && <Check className="w-4 h-4" strokeWidth={1.5} />}
+                      {weaver === w && <Check className="w-4 h-4" weight="bold" />}
                     </button>
                   </li>
                 ))}
@@ -461,7 +461,7 @@ export function ProductionEntry() {
                       onClick={() => setAdding(true)}
                       className="w-full text-left px-3 py-2.5 text-[15px] hover:bg-gray-50 flex items-center gap-2 text-[var(--color-brand-primary)]"
                     >
-                      <Plus className="w-4 h-4" strokeWidth={1.5} />
+                      <Plus className="w-4 h-4" weight="bold" />
                       Add new weaver
                     </button>
                   )}
@@ -737,7 +737,7 @@ function DayStepper({
         className="w-8 h-8 rounded-full border border-[var(--color-border-hairline)] flex items-center justify-center disabled:opacity-30"
         aria-label="Previous entry"
       >
-        <ChevronLeft className="w-4 h-4" strokeWidth={1.75} />
+        <CaretLeft className="w-4 h-4" weight="bold" />
       </button>
       <div className="flex-1 text-center text-[13px]">
         <span className="font-semibold">{shortDate(fromYmd(cur.date))}</span>
@@ -753,7 +753,7 @@ function DayStepper({
         className="w-8 h-8 rounded-full border border-[var(--color-border-hairline)] flex items-center justify-center disabled:opacity-30"
         aria-label="Next entry"
       >
-        <ChevronRight className="w-4 h-4" strokeWidth={1.75} />
+        <CaretRight className="w-4 h-4" weight="bold" />
       </button>
     </div>
   );
@@ -828,7 +828,7 @@ function NextLoomSheet({
         <div className="flex items-center justify-between px-4 pt-4 pb-2">
           <div className="text-base font-semibold">Submitted. Next loom?</div>
           <button onClick={onClose} className="p-1 -mr-1" aria-label="Close">
-            <X className="w-5 h-5" strokeWidth={1.5} />
+            <X className="w-5 h-5" weight="bold" />
           </button>
         </div>
         <div className="px-4 grid grid-cols-4 gap-2 mt-2">
@@ -855,7 +855,7 @@ function NextLoomSheet({
                 <span className="inline-flex items-center gap-1">
                   {l.name}
                   {isNewLoom(l.id) && <NewPill />}
-                  {(isCurrent || isLogged) && <Check className="w-3.5 h-3.5" strokeWidth={2.25} />}
+                  {(isCurrent || isLogged) && <Check className="w-3.5 h-3.5" weight="bold" />}
                 </span>
                 {isCurrent && (
                   <span className="block text-[10px] mt-0.5">Submitted</span>

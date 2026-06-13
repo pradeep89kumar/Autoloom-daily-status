@@ -1,5 +1,5 @@
 import { Outlet, useNavigate, useLocation } from "react-router";
-import { ArrowLeft, Home } from "lucide-react";
+import { ArrowLeft, House } from "@phosphor-icons/react";
 import { ToastHost } from "../components/Toast";
 
 export function MobileLayout() {
@@ -19,7 +19,7 @@ export function MobileLayout() {
       <header className="h-14 bg-white border-b border-[var(--color-border-hairline)] flex items-center px-4 shrink-0">
         {!isHome && (
           <button onClick={() => navigate(-1)} className="p-2 -ml-2 mr-2 text-[var(--color-text-primary)]" aria-label="Back">
-            <ArrowLeft className="w-5 h-5" strokeWidth={1.5} />
+            <ArrowLeft className="w-5 h-5" weight="bold" />
           </button>
         )}
         <h1 className="text-base font-semibold">{title}</h1>
@@ -30,7 +30,7 @@ export function MobileLayout() {
             aria-label="Home"
             title="Home"
           >
-            <Home className="w-5 h-5" strokeWidth={1.5} />
+            <House className="w-5 h-5" weight="bold" />
           </button>
         )}
       </header>

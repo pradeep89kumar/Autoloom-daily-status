@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from "lucide-react";
+import { CaretLeft, CaretRight, CaretDown, CaretUp } from "@phosphor-icons/react";
 import { fetchMasterDay, type MasterRow } from "../../lib/sheetSync";
 import { isNewLoom } from "../../lib/looms";
 import { NewPill } from "../../components/NewPill";
@@ -98,7 +98,7 @@ export function PartnerDay() {
           className="p-2 -ml-2 text-[var(--color-text-primary)]"
           aria-label="Previous day"
         >
-          <ChevronLeft className="w-5 h-5" strokeWidth={1.5} />
+          <CaretLeft className="w-5 h-5" weight="bold" />
         </button>
         <label className="relative inline-flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-black/[0.03] cursor-pointer">
           <span className="text-[14px] text-[var(--color-text-secondary)] leading-none">
@@ -107,7 +107,7 @@ export function PartnerDay() {
           <span className="text-[16px] font-semibold text-[var(--color-text-primary)] tabular-nums leading-none">
             {shortDateLong(date)}
           </span>
-          <ChevronDown className="w-4 h-4 text-[var(--color-text-secondary)]" strokeWidth={1.75} />
+          <CaretDown className="w-4 h-4 text-[var(--color-text-secondary)]" weight="bold" />
           <input
             type="date"
             value={ymd(date)}
@@ -125,7 +125,7 @@ export function PartnerDay() {
           className="p-2 -mr-2 text-[var(--color-text-primary)] disabled:opacity-30"
           aria-label="Next day"
         >
-          <ChevronRight className="w-5 h-5" strokeWidth={1.5} />
+          <CaretRight className="w-5 h-5" weight="bold" />
         </button>
       </div>
 
@@ -301,7 +301,7 @@ function LoomRow({
           {fmtPercent(data.weightedEfficiency)}
         </div>
         <div className="text-[var(--color-text-secondary)]">
-          {open ? <ChevronUp className="w-4 h-4" strokeWidth={1.5} /> : <ChevronDown className="w-4 h-4" strokeWidth={1.5} />}
+          {open ? <CaretUp className="w-4 h-4" weight="bold" /> : <CaretDown className="w-4 h-4" weight="bold" />}
         </div>
       </button>
 

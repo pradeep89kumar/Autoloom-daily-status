@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, CaretDown } from "@phosphor-icons/react";
 import { LOOM_CATALOG, isNewLoom } from "../../lib/looms";
 import { NewPill } from "../../components/NewPill";
 import { Button } from "../../components/ui/button";
@@ -281,7 +281,7 @@ export function NewLoading() {
               <span className={customer !== null ? "" : "text-[var(--color-text-secondary)]"}>
                 {customer === null ? "Select customer" : customer || "(no customer)"}
               </span>
-              <ChevronDown className="w-4 h-4 text-[var(--color-text-secondary)]" strokeWidth={1.5} />
+              <CaretDown className="w-4 h-4 text-[var(--color-text-secondary)]" weight="bold" />
             </button>
             {customerOpen && (
               <div
@@ -318,7 +318,7 @@ export function NewLoading() {
                           className="w-full text-left px-3 py-2.5 hover:bg-gray-50 flex items-center justify-between"
                         >
                           <span className="text-[15px]">{c || "(no customer)"}</span>
-                          {isSel && <Check className="w-4 h-4" strokeWidth={1.5} />}
+                          {isSel && <Check className="w-4 h-4" weight="bold" />}
                         </button>
                       </li>
                     );
@@ -348,7 +348,7 @@ export function NewLoading() {
               <span className={order ? "" : "text-[var(--color-text-secondary)]"}>
                 {order ? order.design : customer === null ? "Select customer first" : "Select design"}
               </span>
-              <ChevronDown className="w-4 h-4 text-[var(--color-text-secondary)]" strokeWidth={1.5} />
+              <CaretDown className="w-4 h-4 text-[var(--color-text-secondary)]" weight="bold" />
             </button>
             {orderOpen && customer !== null && (
               <div
@@ -382,7 +382,7 @@ export function NewLoading() {
                           className="w-full text-left px-3 py-2.5 hover:bg-gray-50 flex items-center justify-between"
                         >
                           <span className="text-[15px]">{o.design}</span>
-                          {isSel && <Check className="w-4 h-4" strokeWidth={1.5} />}
+                          {isSel && <Check className="w-4 h-4" weight="bold" />}
                         </button>
                       </li>
                     );

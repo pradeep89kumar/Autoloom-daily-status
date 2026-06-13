@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
-import { ChevronRight, ChevronDown, ChevronUp, AlertTriangle } from "lucide-react";
+import { CaretRight, CaretDown, CaretUp, Warning } from "@phosphor-icons/react";
 import { fetchCashflow, type CashflowData } from "../../lib/sheetSync";
 
 function fmtINR(n: number): string {
@@ -83,7 +83,7 @@ export function PartnerCash() {
         <>
           {stale && (
             <div className="mb-3 rounded-lg border border-[var(--color-status-amber)]/40 bg-[var(--color-status-amber)]/10 px-3 py-2 flex items-start gap-2">
-              <AlertTriangle className="w-4 h-4 mt-0.5 text-[var(--color-status-amber)] shrink-0" strokeWidth={1.75} />
+              <Warning className="w-4 h-4 mt-0.5 text-[var(--color-status-amber)] shrink-0" weight="fill" />
               <p className="text-[13px] text-[var(--color-text-primary)]">
                 Sheet not updated for {daysSince(data.lastEntryDate)} days.
               </p>
@@ -142,9 +142,9 @@ export function PartnerCash() {
                   {fmtINR(data.month.opCashflowNet)}
                 </span>
                 {opExpanded ? (
-                  <ChevronUp className="w-4 h-4 text-[var(--color-text-secondary)]" strokeWidth={1.75} />
+                  <CaretUp className="w-4 h-4 text-[var(--color-text-secondary)]" weight="bold" />
                 ) : (
-                  <ChevronDown className="w-4 h-4 text-[var(--color-text-secondary)]" strokeWidth={1.75} />
+                  <CaretDown className="w-4 h-4 text-[var(--color-text-secondary)]" weight="bold" />
                 )}
               </span>
             </button>
@@ -167,7 +167,7 @@ export function PartnerCash() {
             className="flex items-center justify-between rounded-xl bg-white border border-[var(--color-border-hairline)] shadow-[0_2px_8px_rgba(0,0,0,0.06)] px-4 py-3 active:bg-black/[0.02] mb-2"
           >
             <span className="text-[14px] font-medium text-[var(--color-text-primary)]">View statement</span>
-            <ChevronRight className="w-4 h-4 text-[var(--color-text-secondary)]" strokeWidth={1.75} />
+            <CaretRight className="w-4 h-4 text-[var(--color-text-secondary)]" weight="bold" />
           </Link>
 
           <Link
@@ -178,7 +178,7 @@ export function PartnerCash() {
               <p className="text-[14px] font-medium text-[var(--color-text-primary)]">New Shed Expenses</p>
               <p className="text-[11px] text-[var(--color-text-secondary)] mt-0.5">6 looms project · capex register</p>
             </div>
-            <ChevronRight className="w-4 h-4 text-[var(--color-text-secondary)] shrink-0" strokeWidth={1.75} />
+            <CaretRight className="w-4 h-4 text-[var(--color-text-secondary)] shrink-0" weight="bold" />
           </Link>
         </>
       )}

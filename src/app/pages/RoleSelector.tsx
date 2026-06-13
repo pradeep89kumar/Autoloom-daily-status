@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router";
-import { Wallet, HardHat, Lock, ChevronRight, Download, Share, MoreVertical } from "lucide-react";
+import { Wallet, HardHat, Lock, CaretRight, DownloadSimple, Export, DotsThreeVertical, type Icon } from "@phosphor-icons/react";
 import { usePwaInstall } from "../lib/usePwaInstall";
 
 export function RoleSelector() {
@@ -55,7 +55,7 @@ export function RoleSelector() {
           onClick={() => install.prompt()}
           className="mt-8 inline-flex items-center gap-2 px-4 py-2.5 rounded-full bg-[var(--color-brand-primary)] text-white text-[14px] font-semibold active:translate-y-px"
         >
-          <Download className="w-4 h-4" strokeWidth={2} />
+          <DownloadSimple className="w-4 h-4" weight="bold" />
           Install on this device
         </button>
       )}
@@ -63,7 +63,7 @@ export function RoleSelector() {
       {install.kind === "ios" && (
         <div className="mt-8 w-full max-w-sm rounded-2xl border border-[var(--color-border-hairline)] bg-white px-4 py-3.5">
           <div className="flex items-center gap-2 text-[14px] font-semibold text-[var(--color-text-primary)]">
-            <Share className="w-4 h-4" strokeWidth={2} />
+            <Export className="w-4 h-4" weight="bold" />
             Add to Home Screen
           </div>
           <p className="mt-1.5 text-[13px] leading-relaxed text-[var(--color-text-secondary)]">
@@ -75,7 +75,7 @@ export function RoleSelector() {
       {install.kind === "android" && (
         <div className="mt-8 w-full max-w-sm rounded-2xl border border-[var(--color-border-hairline)] bg-white px-4 py-3.5">
           <div className="flex items-center gap-2 text-[14px] font-semibold text-[var(--color-text-primary)]">
-            <MoreVertical className="w-4 h-4" strokeWidth={2} />
+            <DotsThreeVertical className="w-4 h-4" weight="bold" />
             Install on Home Screen
           </div>
           <p className="mt-1.5 text-[13px] leading-relaxed text-[var(--color-text-secondary)]">
@@ -98,7 +98,7 @@ function RoleCard({
   onClick,
 }: {
   tone: "brand" | "neutral";
-  Icon: typeof Wallet;
+  Icon: Icon;
   title: string;
   subtitle: string;
   locked?: boolean;
@@ -124,7 +124,7 @@ function RoleCard({
       <span
         className={`shrink-0 w-12 h-12 rounded-full flex items-center justify-center ${iconWrapCls}`}
       >
-        <Icon className="w-6 h-6" strokeWidth={1.75} />
+        <Icon className="w-6 h-6" weight="duotone" />
       </span>
       <span className="flex-1 min-w-0">
         <span className="flex items-center gap-1.5">
@@ -134,7 +134,7 @@ function RoleCard({
           {locked && (
             <Lock
               className="w-3.5 h-3.5 text-[var(--color-text-secondary)]"
-              strokeWidth={2}
+              weight="fill"
             />
           )}
         </span>
@@ -142,9 +142,9 @@ function RoleCard({
           {subtitle}
         </span>
       </span>
-      <ChevronRight
+      <CaretRight
         className="w-5 h-5 text-[var(--color-text-secondary)] shrink-0"
-        strokeWidth={1.5}
+        weight="bold"
       />
     </button>
   );

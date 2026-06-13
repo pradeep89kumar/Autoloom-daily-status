@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, CircleNotch } from "@phosphor-icons/react";
 import {
   fetchCashLedger,
   type CashAccount,
@@ -89,7 +89,7 @@ export function PartnerCashStatement() {
           className="p-2 -ml-2 mr-2 text-[var(--color-text-primary)]"
           aria-label="Back"
         >
-          <ArrowLeft className="w-5 h-5" strokeWidth={1.5} />
+          <ArrowLeft className="w-5 h-5" weight="bold" />
         </button>
         <div className="flex flex-col">
           <h1 className="text-base font-semibold leading-tight">Statement</h1>
@@ -126,7 +126,7 @@ export function PartnerCashStatement() {
 
         {loading && entries !== null && (
           <div className="absolute inset-0 bg-white/60 flex items-start justify-center pt-10 z-10">
-            <Loader2 className="w-5 h-5 animate-spin text-[var(--color-text-secondary)]" strokeWidth={1.75} />
+            <CircleNotch className="w-5 h-5 animate-spin text-[var(--color-text-secondary)]" weight="bold" />
           </div>
         )}
 

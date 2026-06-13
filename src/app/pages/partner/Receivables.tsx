@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { CaretDown, CaretUp } from "@phosphor-icons/react";
 import { fetchMasterReceivables, type ReceivableRow } from "../../lib/sheetSync";
 import { fmtRupees } from "../../lib/partnerCopy";
 
@@ -265,14 +265,14 @@ export function PartnerReceivables() {
                 <div className="flex items-center gap-2 shrink-0">
                   <span className="text-[18px] font-bold tabular-nums text-[var(--color-text-primary)]">{fmtRupees(g.total)}</span>
                   {isOpen ? (
-                    <ChevronUp
+                    <CaretUp
                       className="w-4 h-4 text-[var(--color-text-secondary)]"
-                      strokeWidth={1.5}
+                      weight="bold"
                     />
                   ) : (
-                    <ChevronDown
+                    <CaretDown
                       className="w-4 h-4 text-[var(--color-text-secondary)]"
-                      strokeWidth={1.5}
+                      weight="bold"
                     />
                   )}
                 </div>

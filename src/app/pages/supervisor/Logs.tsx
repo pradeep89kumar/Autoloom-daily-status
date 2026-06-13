@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
-import { Lock, Pencil } from "lucide-react";
+import { Lock, PencilSimple } from "@phosphor-icons/react";
 import { fetchFullRows, type FullRow } from "../../lib/sheetSync";
 import { fromYmd, shortDate } from "../../lib/shift";
 import { LOOM_CATALOG, naturalLoomCompare, isNewLoom } from "../../lib/looms";
@@ -167,7 +167,7 @@ export function Logs() {
                               aria-label="Editable"
                               title="Editable"
                             >
-                              <Pencil className="w-3.5 h-3.5" strokeWidth={1.75} />
+                              <PencilSimple className="w-3.5 h-3.5" weight="fill" />
                             </span>
                           ) : (
                             <span
@@ -175,7 +175,7 @@ export function Logs() {
                               aria-label="Locked"
                               title="Locked · edit on Google Sheet"
                             >
-                              <Lock className="w-3.5 h-3.5" strokeWidth={1.75} />
+                              <Lock className="w-3.5 h-3.5" weight="fill" />
                             </span>
                           )}
                         </span>
