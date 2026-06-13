@@ -169,47 +169,63 @@ export function PartnerTrend() {
   const targetStats = useMemo(() => {
     if (!mtdRows) return null;
     const now = new Date();
-    // Calendar days — the looms run every day in shifts, so day-of-month is
-    // the honest denominator (a zero-revenue day is a real slow day).
     const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-    const dayOfMonth = now.getDate();
     const targetPerDay = MONTHLY_TARGET / daysInMonth;
 
+    // Pace is measured over days that actually produced. Today is normally
+    // still in progress (or not yet entered), so it falls out on its own —
+    // that is what makes the denominator "12 completed days" on the 13th,
+    // not 13. Avoids flattering or punishing the run-rate with a half day.
     let revenue = 0;
-    for (const r of mtdRows) revenue += r.revenue;
+    const dateSet = new Set<string>();
+    for (const r of mtdRows) {
+      revenue += r.revenue;
+      if (r.revenue > 0 || r.meters > 0) dateSet.add(r.date);
+    }
+    const daysElapsed = dateSet.size;
 
-    const shouldBeByToday = targetPerDay * dayOfMonth;
+    const shouldBeByToday = targetPerDay * daysElapsed;
     const paceFraction = shouldBeByToday > 0 ? revenue / shouldBeByToday : 0;
-    const avgPerDay = dayOfMonth > 0 ? revenue / dayOfMonth : 0;
+    const avgPerDay = daysElapsed > 0 ? revenue / daysElapsed : 0;
     const projected = avgPerDay * daysInMonth;
     const gap = MONTHLY_TARGET - projected;
+    const targetFraction = MONTHLY_TARGET > 0 ? revenue / MONTHLY_TARGET : 0;
+    const todayMarkFraction = MONTHLY_TARGET > 0 ? shouldBeByToday / MONTHLY_TARGET : 0;
 
     return {
       revenue,
       daysInMonth,
-      dayOfMonth,
-      targetPerDay,
+      daysElapsed,
       shouldBeByToday,
       paceFraction,
       avgPerDay,
       projected,
       gap,
+      targetFraction,
+      todayMarkFraction,
     };
   }, [mtdRows]);
 
   // Per-loom month-to-date status, for the diagnosis tier.
   const loomStatus = useMemo(() => {
     if (!mtdRows) return null;
-    const dayOfMonth = new Date().getDate();
     const revByLoom = new Map<string, number>();
+    const daysByLoom = new Map<string, Set<string>>();
     for (const r of mtdRows) {
       revByLoom.set(r.loom, (revByLoom.get(r.loom) || 0) + r.revenue);
+      if (r.revenue > 0 || r.meters > 0) {
+        if (!daysByLoom.has(r.loom)) daysByLoom.set(r.loom, new Set());
+        daysByLoom.get(r.loom)!.add(r.date);
+      }
     }
     const out = LOOMS.map((loom) => {
       const total = revByLoom.get(loom) || 0;
-      const avg = dayOfMonth > 0 ? total / dayOfMonth : 0;
+      // Divide by each loom's own active days so newly added looms are judged
+      // on the days they actually ran, not the whole month.
+      const days = daysByLoom.get(loom)?.size || 0;
+      const avg = days > 0 ? total / days : 0;
       let band: "on" | "below" | "weak" | "idle";
-      if (total <= 0) band = "idle";
+      if (total <= 0 || days === 0) band = "idle";
       else if (avg >= PER_LOOM_DAY_TARGET) band = "on";
       else if (avg >= PER_LOOM_DAY_TARGET * 0.6) band = "below";
       else band = "weak";
@@ -539,13 +555,14 @@ function MonthTargetCard({
   stats: {
     revenue: number;
     daysInMonth: number;
-    dayOfMonth: number;
-    targetPerDay: number;
+    daysElapsed: number;
     shouldBeByToday: number;
     paceFraction: number;
     avgPerDay: number;
     projected: number;
     gap: number;
+    targetFraction: number;
+    todayMarkFraction: number;
   };
   monthStart: Date;
   momentum: { dir: "up" | "flat" | "down"; delta: number } | null;
@@ -553,80 +570,115 @@ function MonthTargetCard({
 }) {
   const monthName = monthStart.toLocaleDateString("en-GB", { month: "long" });
 
-  // Trajectory drives the hero colour — is the trend heading the right way?
-  // Falls back to projected-vs-target when momentum data is insufficient.
-  const ratio = stats.projected / MONTHLY_TARGET;
-  const trajectoryTone =
-    momentum?.dir === "up" || (momentum == null && ratio >= 1)
-      ? { text: "text-[var(--color-status-green)]", bar: "bg-[var(--color-status-green)]", soft: "bg-[var(--color-status-green)]/10", border: "border-[var(--color-status-green)]/30" }
-      : momentum?.dir === "down" || (momentum == null && ratio < 0.8)
-      ? { text: "text-[var(--color-status-red)]", bar: "bg-[var(--color-status-red)]", soft: "bg-[var(--color-status-red)]/10", border: "border-[var(--color-status-red)]/30" }
-      : { text: "text-[var(--color-status-amber)]", bar: "bg-[var(--color-status-amber)]", soft: "bg-[var(--color-status-amber)]/10", border: "border-[var(--color-status-amber)]/30" };
+  // On-track status = how the money earned so far compares with where it
+  // should be by now. This colours the bar and the gap line — NOT the hero
+  // number, which stays neutral because it is a plain fact, not a verdict.
+  const pace = stats.paceFraction;
+  const tone =
+    pace >= 0.97
+      ? { text: "text-[var(--color-status-green)]", bar: "bg-[var(--color-status-green)]" }
+      : pace >= 0.8
+      ? { text: "text-[var(--color-status-amber)]", bar: "bg-[var(--color-status-amber)]" }
+      : { text: "text-[var(--color-status-red)]", bar: "bg-[var(--color-status-red)]" };
 
-  const paceBarPct = Math.max(0, Math.min(1, stats.paceFraction)) * 100;
+  // Momentum chip = production speed this week vs last week (a trend, not a
+  // level), so it is kept small and separate from the on-track status.
+  const momoTone =
+    momentum?.dir === "up"
+      ? "bg-[var(--color-status-green)]/10 text-[var(--color-status-green)]"
+      : momentum?.dir === "down"
+      ? "bg-[var(--color-status-red)]/10 text-[var(--color-status-red)]"
+      : "bg-black/[0.05] text-[var(--color-text-secondary)]";
 
-  // Diagnosis sentence — mostly English with loom IDs.
+  const barFill = Math.max(0, Math.min(1, stats.targetFraction)) * 100;
+  const tickPos = Math.max(0, Math.min(1, stats.todayMarkFraction)) * 100;
+  const short = stats.gap > 0;
+
   const diagnosis = loomStatus ? buildDiagnosis(loomStatus) : null;
 
   return (
     <div className="rounded-xl bg-white border border-[var(--color-border-hairline)] shadow-[0_2px_8px_rgba(0,0,0,0.06)] px-4 pt-4 pb-4 mb-4">
-      {/* Tier 1 — verdict */}
-      <div className="flex items-start justify-between mb-1">
+      {/* Header — month + production-speed trend */}
+      <div className="flex items-center justify-between mb-2">
         <span className="text-[12px] uppercase tracking-wide text-[var(--color-text-secondary)]">
           இந்த மாதம் · {monthName}
         </span>
         {momentum ? (
-          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[12px] font-semibold ${trajectoryTone.soft} ${trajectoryTone.text}`}>
+          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[12px] font-semibold ${momoTone}`}>
             {momentum.dir === "up" ? (
               <>
                 <TrendUp className="w-3.5 h-3.5" weight="bold" />
-                முன்னேற்றம்
+                வேகம் கூடுது
               </>
             ) : momentum.dir === "down" ? (
               <>
                 <TrendDown className="w-3.5 h-3.5" weight="bold" />
-                குறைவு
+                வேகம் குறையுது
               </>
             ) : (
               <>
                 <ArrowRight className="w-3.5 h-3.5" weight="bold" />
-                நிலையானது
+                வேகம் நிலையானது
               </>
             )}
           </span>
         ) : null}
       </div>
 
+      {/* Hero — what has actually been earned (concrete fact, neutral colour) */}
       <div className="flex items-baseline gap-2">
-        <span className={`text-[30px] font-bold tabular-nums leading-tight ${trajectoryTone.text}`}>
-          {fmtLakh(stats.projected)}
+        <span className="text-[32px] font-bold tabular-nums leading-tight text-[var(--color-text-primary)]">
+          {fmtLakh(stats.revenue)}
         </span>
-        <span className="text-[15px] text-[var(--color-text-secondary)]">
-          நோக்கி · {fmtLakh(MONTHLY_TARGET)} இலக்கில்
+        <span className="text-[14px] text-[var(--color-text-secondary)]">
+          தயாரித்தது · {stats.daysElapsed} நாட்களில்
         </span>
       </div>
 
-      {/* Pace-to-date bar with a "today" tick at 100% */}
-      <div className="mt-3 relative h-2 rounded-full bg-black/[0.06] overflow-hidden">
-        <div className={`h-full rounded-full ${trajectoryTone.bar}`} style={{ width: `${paceBarPct}%` }} />
+      {/* Progress toward the hard ₹15L target, with a tick for "by today" */}
+      <div className="mt-3 relative h-2.5 rounded-full bg-black/[0.06]">
+        <div
+          className={`absolute inset-y-0 left-0 rounded-full ${tone.bar}`}
+          style={{ width: `${barFill}%` }}
+        />
+        <div
+          className="absolute -top-1 -bottom-1 w-[2px] rounded-full bg-[var(--color-text-primary)]/45"
+          style={{ left: `${tickPos}%` }}
+          title="இன்றுவரை இருக்கவேண்டிய இடம்"
+        />
       </div>
       <div className="flex items-center justify-between mt-1.5">
-        <p className="text-[12px] text-[var(--color-text-secondary)] tabular-nums">
-          இன்றுவரை இருக்கவேண்டியது {fmtLakh(stats.shouldBeByToday)}
-        </p>
-        <p className={`text-[12px] font-semibold tabular-nums ${trajectoryTone.text}`}>
-          {fmtPercent(stats.paceFraction)}
-        </p>
+        <span className="text-[12px] text-[var(--color-text-secondary)] tabular-nums">
+          ₹15L இலக்கு · இன்றுவரை {fmtLakh(stats.shouldBeByToday)} வேண்டும்
+        </span>
+        <span className={`text-[12px] font-semibold tabular-nums ${tone.text}`}>
+          {fmtPercent(stats.targetFraction)}
+        </span>
       </div>
 
-      {/* Tier 2 — story trio */}
+      {/* Trio — earned / pace / projection at a glance */}
       <div className="mt-3 pt-3 border-t border-[var(--color-border-hairline)] grid grid-cols-3 gap-2">
-        <TrioCell label="வந்தது" value={fmtLakh(stats.revenue)} />
+        <TrioCell label="தயாரித்தது" value={fmtLakh(stats.revenue)} />
         <TrioCell label="Pace" value={`${fmtThousand(stats.avgPerDay)}/day`} />
         <TrioCell label="Projected" value={fmtLakh(stats.projected)} />
       </div>
 
-      {/* Tier 3 — diagnosis */}
+      {/* Gap line — makes it unambiguous that "Projected" is NOT the target */}
+      <p className="mt-2 text-[13px] leading-relaxed text-[var(--color-text-primary)]">
+        {short ? (
+          <>
+            இந்த வேகத்தில் மாத இறுதியில் <span className="font-bold tabular-nums">{fmtLakh(stats.projected)}</span> — ₹15L இலக்கைவிட{" "}
+            <span className={`font-bold tabular-nums ${tone.text}`}>{fmtLakh(stats.gap)} குறைவு</span>
+          </>
+        ) : (
+          <>
+            இந்த வேகத்தில் ₹15L இலக்கைவிட{" "}
+            <span className="font-bold tabular-nums text-[var(--color-status-green)]">{fmtLakh(-stats.gap)} அதிகம்</span>
+          </>
+        )}
+      </p>
+
+      {/* Diagnosis — why the gap exists */}
       {loomStatus ? (
         <div className="mt-3 pt-3 border-t border-[var(--color-border-hairline)]">
           <div className="text-[12px] uppercase tracking-wide text-[var(--color-text-secondary)] mb-1.5">காரணம்</div>
