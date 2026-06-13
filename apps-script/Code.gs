@@ -19,6 +19,7 @@
  *  GET  ?mode=cashflow                         → cash position + monthly summary from Master Control tab
  *  GET  ?mode=cashflow-ledger&from=&to=&account=&direction= → ledger entries for the statement view
  *  GET  ?mode=capex&project=6%20Looms          → Capex Register entries + totals for one project (default "6 Looms")
+ *  GET  ?mode=beams                            → Beam Register tables from R.O STATUS tab (loaded/vendor/ready/empty/master)
  *  POST kind:"edit"           → overwrite Sheet1 row by rowIndex, only inside edit window
  */
 
@@ -36,6 +37,10 @@ var MASTER_ORDER_TAB = "Order";
 var MASTER_PAAGU_TAB = "Paagu ID";
 var MASTER_CASHFLOW_TAB = "Master Control";   // ← confirm exact tab name
 var MASTER_CAPEX_TAB = "Capex Register";
+
+// Beam Register — separate spreadsheet tracking every physical beam asset.
+var BEAM_SHEET_ID = "1sHQIkVJcB-QfuuFVCWo16WpNjlZtLFFne5v4XvcF2YI";
+var BEAM_TAB = "R.O STATUS";
 
 // Capex Register columns (1-indexed, A..G only — only G-and-left are critical):
 //  A Date · B Project · C Expense · D Vendor · E Amount · F Paid From · G Funding Source
@@ -171,6 +176,9 @@ function doGet(e) {
   if (mode === "capex") {
     var capexProject = (e.parameter && e.parameter.project) || "6 Looms";
     return _json({ ok: true, capex: _readCapex(capexProject) });
+  }
+  if (mode === "beams") {
+    return _readBeams();
   }
   return _json({ ok: true, rows: _readLightRows(21) });
 }
@@ -799,6 +807,132 @@ function _readCapex(projectFilter) {
     byPaidFrom: byPaidFrom,
     rows: rows
   };
+}
+
+/* ------------------------------ beam register ------------------------------ */
+/**
+ * Reads the four beam tables from the "R.O STATUS" tab and returns them raw.
+ * The front-end normaliser collapses them into one beam list, resolves
+ * conflicts, and infers ready-beam ids by elimination — so this stays "dumb"
+ * and just locates each block by its header text (robust to the sheet's exact
+ * row/column layout, which is hand-maintained).
+ *
+ *   loaded : LOOM NO · in SAT(=design) · Beam NO
+ *   vendor : OUT SIDE(=warping vendor) · Beam NO
+ *   ready  : LOAD WARP IN SAT(=design) · MTRS · BEAM NO (usually blank)
+ *   empty  : EMPTY BEAM
+ *   master : <beam id> · <location: "in SAT" | vendor>   (scanned by pattern)
+ */
+function _readBeams() {
+  try {
+    var ss = SpreadsheetApp.openById(BEAM_SHEET_ID);
+    var sh = ss.getSheetByName(BEAM_TAB);
+    if (!sh) return _json({ ok: false, error: "tab not found: " + BEAM_TAB });
+    var g = sh.getDataRange().getValues();
+
+    var norm = function (v) { return String(v == null ? "" : v).trim(); };
+    var low = function (v) { return norm(v).toLowerCase(); };
+    var isBeamId = function (v) {
+      var s = norm(v);
+      return /^\d+$/.test(s) || /^vvk[\s-]*\d+$/i.test(s);
+    };
+    var isInSat = function (v) { return /^in\s*sat$/i.test(norm(v)); };
+
+    // Locate a header row+columns by matching label predicates within one row.
+    var findHeader = function (labels) {
+      for (var r = 0; r < g.length; r++) {
+        var cols = {};
+        var hit = 0;
+        for (var c = 0; c < g[r].length; c++) {
+          var cell = low(g[r][c]);
+          for (var k in labels) {
+            if (cols[k] == null && labels[k].test(cell)) { cols[k] = c; hit++; }
+          }
+        }
+        var need = 0; for (var kk in labels) need++;
+        if (hit === need) return { row: r, cols: cols };
+      }
+      return null;
+    };
+
+    var loaded = [];
+    var hl = findHeader({ loom: /^loom\s*no$/, design: /^in\s*sat$/, beam: /^beam\s*no$/ });
+    if (hl) {
+      for (var r1 = hl.row + 1; r1 < g.length; r1++) {
+        var lm = norm(g[r1][hl.cols.loom]);
+        var bd = norm(g[r1][hl.cols.beam]);
+        if (!lm && !bd) break;
+        if (!bd) continue;
+        loaded.push({ loom: lm, design: norm(g[r1][hl.cols.design]), beamNo: bd });
+      }
+    }
+
+    var vendor = [];
+    var hv = findHeader({ out: /^out\s*side$/, beam: /^beam\s*no$/ });
+    if (hv) {
+      for (var r2 = hv.row + 1; r2 < g.length; r2++) {
+        var vn = norm(g[r2][hv.cols.out]);
+        var vb = norm(g[r2][hv.cols.beam]);
+        if (!vn && !vb) break;
+        if (!vb) continue;
+        vendor.push({ vendor: vn, beamNo: vb });
+      }
+    }
+
+    var ready = [];
+    var hr = findHeader({ design: /^load\s*warp\s*in\s*sat$/, mtrs: /^mtrs$/ });
+    if (hr) {
+      var rbeam = hr.cols.beam != null ? hr.cols.beam : null;
+      for (var r3 = hr.row + 1; r3 < g.length; r3++) {
+        var rd = norm(g[r3][hr.cols.design]);
+        if (!rd) {
+          // stop only after a run of blanks; tolerate the trailing empty rows
+          var aheadBlank = !norm(g[r3 + 1] ? g[r3 + 1][hr.cols.design] : "");
+          if (aheadBlank) break; else continue;
+        }
+        var mtr = Number(g[r3][hr.cols.mtrs]);
+        ready.push({
+          design: rd,
+          meters: isFinite(mtr) && mtr > 0 ? mtr : null,
+          beamNo: rbeam != null ? norm(g[r3][rbeam]) : ""
+        });
+      }
+    }
+
+    var empty = [];
+    var he = findHeader({ eb: /^empty\s*beam$/ });
+    if (he) {
+      for (var r4 = he.row + 1; r4 < g.length; r4++) {
+        var eb = norm(g[r4][he.cols.eb]);
+        if (!eb) {
+          var nextBlank = !norm(g[r4 + 1] ? g[r4 + 1][he.cols.eb] : "");
+          if (nextBlank) break; else continue;
+        }
+        empty.push({ beamNo: eb });
+      }
+    }
+
+    // Master list — scan for "<beam id> | <location>" pairs anywhere in the grid.
+    var master = [];
+    var seen = {};
+    for (var mr = 0; mr < g.length; mr++) {
+      for (var mc = 0; mc + 1 < g[mr].length; mc++) {
+        var left = norm(g[mr][mc]);
+        var right = norm(g[mr][mc + 1]);
+        if (!isBeamId(left) || !right) continue;
+        var locOk = isInSat(right) || /^[A-Za-z][A-Za-z .'\-]{1,24}$/.test(right);
+        if (!locOk) continue;
+        var key = left.toLowerCase();
+        if (seen[key]) continue;
+        seen[key] = true;
+        master.push({ beamNo: left, location: right });
+      }
+    }
+
+    return _json({ ok: true, loaded: loaded, vendor: vendor, ready: ready, empty: empty, master: master });
+  } catch (err) {
+    return _json({ ok: false, error: String(err) });
+  }
 }
 
 /* ------------------------------ helpers ------------------------------ */

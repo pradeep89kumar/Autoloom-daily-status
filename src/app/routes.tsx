@@ -8,6 +8,7 @@ import { ProductionEntry } from "./pages/supervisor/ProductionEntry";
 import { PendingList } from "./pages/supervisor/PendingList";
 import { NewLoading } from "./pages/supervisor/NewLoading";
 import { Logs } from "./pages/supervisor/Logs";
+import { BeamRegister } from "./pages/supervisor/BeamRegister";
 import { PinGate } from "./pages/partner/PinGate";
 import { PartnerShell } from "./pages/partner/PartnerShell";
 import { PartnerDay } from "./pages/partner/Day";
@@ -35,6 +36,7 @@ export const router = createBrowserRouter([
       { path: "production/:loomId", Component: ProductionEntry },
       { path: "pending", Component: PendingList },
       { path: "new-loading", Component: NewLoading },
+      { path: "beams", Component: BeamRegister },
       { path: "logs", Component: Logs },
     ],
   },

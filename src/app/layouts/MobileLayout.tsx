@@ -12,6 +12,7 @@ export function MobileLayout() {
   else if (location.pathname.includes("/supervisor/production")) title = "Production";
   else if (location.pathname.includes("/supervisor/pending")) title = "Pending entries";
   else if (location.pathname.includes("/supervisor/new-loading")) title = "New loading";
+  else if (location.pathname.includes("/supervisor/beams")) title = "Beam register";
   else if (location.pathname.includes("/supervisor/logs")) title = "Past logs";;
 
   return (
