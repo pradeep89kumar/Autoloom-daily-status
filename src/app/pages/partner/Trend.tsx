@@ -21,6 +21,17 @@ type Metric = "efficiency" | "meters" | "revenue";
 const DAYS = 14;
 const LOOMS = LOOM_CATALOG.map((l) => l.name);
 
+// Monthly revenue target (round figure). Pro-rated by elapsed operating days
+// so mid-month attainment is judged fairly, not against the full month.
+const MONTHLY_TARGET = 1500000;
+const DAYS_IN_MONTH = 30;
+const TARGET_PER_DAY = MONTHLY_TARGET / DAYS_IN_MONTH; // ₹50,000
+
+function fmtLakh(n: number): string {
+  if (!isFinite(n)) return "—";
+  return `₹${(n / 100000).toFixed(1)}L`;
+}
+
 function ymd(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -91,8 +102,14 @@ export function PartnerTrend() {
   const [metric, setMetric] = useState<Metric>("efficiency");
   const [rows, setRows] = useState<MasterRangeRow[] | null>(null);
   const [loading, setLoading] = useState(true);
+  const [mtdRows, setMtdRows] = useState<MasterRangeRow[] | null>(null);
 
   const dates = useMemo(() => lastNDates(DAYS), []);
+
+  const monthStart = useMemo(() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -120,7 +137,40 @@ export function PartnerTrend() {
     };
   }, [dates]);
 
+  useEffect(() => {
+    let alive = true;
+    const from = ymd(monthStart);
+    const to = ymd(new Date());
+    fetchMasterRange(from, to).then((r) => {
+      if (!alive) return;
+      const filtered = r.filter(
+        (row) => !(isNewLoom(row.loom) && row.date < "2026-06-07"),
+      );
+      setMtdRows(filtered);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [monthStart]);
+
   const grid = useMemo(() => buildGrid(rows || []), [rows]);
+
+  const targetStats = useMemo(() => {
+    if (!mtdRows) return null;
+    let revenue = 0;
+    const dateSet = new Set<string>();
+    for (const r of mtdRows) {
+      revenue += r.revenue;
+      if (r.revenue > 0 || r.meters > 0) dateSet.add(r.date);
+    }
+    const daysElapsed = dateSet.size;
+    const targetToDate = TARGET_PER_DAY * daysElapsed;
+    const attainment = targetToDate > 0 ? revenue / targetToDate : 0;
+    const avgPerDay = daysElapsed > 0 ? revenue / daysElapsed : 0;
+    const projected = avgPerDay * DAYS_IN_MONTH;
+    const gap = MONTHLY_TARGET - projected;
+    return { revenue, daysElapsed, targetToDate, attainment, avgPerDay, projected, gap };
+  }, [mtdRows]);
 
   const maxByMetric = useMemo(() => {
     let max = 0;
@@ -158,6 +208,13 @@ export function PartnerTrend() {
 
   return (
     <div className="px-4 py-4">
+      {/* Monthly target tracker */}
+      {targetStats ? (
+        <MonthTargetCard stats={targetStats} monthStart={monthStart} />
+      ) : (
+        <div className="h-32 bg-black/[0.04] rounded-xl animate-pulse mb-5" />
+      )}
+
       <div className="mb-4">
         <h2 className="text-[18px] font-bold mb-1 text-[var(--color-text-primary)]">கடந்த {DAYS} நாட்கள்</h2>
         <p className="text-[14px] text-[var(--color-text-secondary)]">
@@ -372,6 +429,79 @@ export function PartnerTrend() {
           </ul>
         )}
       </div>
+    </div>
+  );
+}
+
+function MonthTargetCard({
+  stats,
+  monthStart,
+}: {
+  stats: {
+    revenue: number;
+    daysElapsed: number;
+    targetToDate: number;
+    attainment: number;
+    avgPerDay: number;
+    projected: number;
+    gap: number;
+  };
+  monthStart: Date;
+}) {
+  const monthName = monthStart.toLocaleDateString("en-GB", { month: "long" });
+  const barPct = Math.max(0, Math.min(1, stats.attainment)) * 100;
+
+  // Colour by projected month landing vs the full target.
+  const ratio = stats.projected / MONTHLY_TARGET;
+  const tone =
+    ratio >= 1
+      ? { bar: "bg-[var(--color-status-green)]", text: "text-[var(--color-status-green)]" }
+      : ratio >= 0.8
+      ? { bar: "bg-[var(--color-status-amber)]", text: "text-[var(--color-status-amber)]" }
+      : { bar: "bg-[var(--color-status-red)]", text: "text-[var(--color-status-red)]" };
+
+  const shortfall = stats.gap > 0;
+
+  return (
+    <div className="rounded-xl bg-white border border-[var(--color-border-hairline)] shadow-[0_2px_8px_rgba(0,0,0,0.06)] px-4 py-4 mb-5">
+      <div className="flex items-baseline justify-between mb-2">
+        <span className="text-[12px] uppercase tracking-wide text-[var(--color-text-secondary)]">
+          மாத இலக்கு · {monthName}
+        </span>
+        <span className="text-[13px] font-semibold text-[var(--color-text-primary)] tabular-nums">
+          {fmtLakh(MONTHLY_TARGET)}
+        </span>
+      </div>
+
+      <div className="flex items-baseline gap-2">
+        <span className="text-[28px] font-bold tabular-nums text-[var(--color-text-primary)] leading-tight">
+          {fmtRupees(stats.revenue)}
+        </span>
+        <span className={`text-[15px] font-semibold tabular-nums ${tone.text}`}>
+          {fmtPercent(stats.attainment)}
+        </span>
+      </div>
+
+      <div className="mt-2 h-2 rounded-full bg-black/[0.06] overflow-hidden">
+        <div className={`h-full rounded-full ${tone.bar}`} style={{ width: `${barPct}%` }} />
+      </div>
+      <p className="text-[12px] text-[var(--color-text-secondary)] mt-1.5">
+        இலக்கு {fmtRupees(stats.targetToDate)} வரை · {stats.daysElapsed} நாட்கள்
+      </p>
+
+      <div className="mt-3 pt-3 border-t border-[var(--color-border-hairline)] flex items-center justify-between text-[13px]">
+        <span className="text-[var(--color-text-secondary)] tabular-nums">
+          Pace {fmtRupees(stats.avgPerDay)}/நாள்
+        </span>
+        <span className="text-[var(--color-text-primary)] font-medium tabular-nums">
+          Projected {fmtLakh(stats.projected)}
+        </span>
+      </div>
+      <p className={`text-[12px] font-medium mt-1 tabular-nums ${shortfall ? tone.text : "text-[var(--color-status-green)]"}`}>
+        {shortfall
+          ? `${fmtLakh(stats.gap)} குறைவாக இருக்கும்`
+          : `இலக்கை ${fmtLakh(-stats.gap)} தாண்டும்`}
+      </p>
     </div>
   );
 }
