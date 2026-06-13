@@ -465,10 +465,9 @@ function byLoom(a: Beam, b: Beam): number {
 
 function ReadySection({ data }: { data: BeamRegisterData }) {
   const warps = data.readyWarps;
-  const readyBeams = data.beams.filter((b) => b.state === "ready");
   return (
     <div className="px-4">
-      <SectionHeader state="ready" count={warps.length || readyBeams.length} />
+      <SectionHeader state="ready" count={warps.length} />
       {warps.length === 0 ? (
         <Empty label="No warps ready to load" />
       ) : (
@@ -477,14 +476,6 @@ function ReadySection({ data }: { data: BeamRegisterData }) {
             <ReadyWarpCard key={i} warp={w} />
           ))}
         </div>
-      )}
-      {readyBeams.length > 0 && (
-        <p className="mt-2.5 text-[12px] text-[var(--color-text-secondary)] leading-relaxed">
-          On beams:{" "}
-          <span className="font-medium text-[var(--color-text-primary)]">
-            {readyBeams.map((b) => b.id).join(" · ")}
-          </span>
-        </p>
       )}
     </div>
   );

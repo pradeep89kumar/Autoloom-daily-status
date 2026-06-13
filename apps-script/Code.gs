@@ -868,14 +868,23 @@ function _readBeams() {
     }
 
     var vendor = [];
-    var hv = findHeader({ out: /^out\s*side$/, beam: /^beam\s*no$/ });
+    var hv = findHeader({ out: /^out\s*side$/ });
     if (hv) {
-      for (var r2 = hv.row + 1; r2 < g.length; r2++) {
-        var vn = norm(g[r2][hv.cols.out]);
-        var vb = norm(g[r2][hv.cols.beam]);
-        if (!vn && !vb) break;
-        if (!vb) continue;
-        vendor.push({ vendor: vn, beamNo: vb });
+      // The tab lays several tables side by side, so a single header row can
+      // hold more than one "Beam NO". This table's Beam NO is the first one to
+      // the RIGHT of its OUT SIDE column (S.NO · OUT SIDE · Beam NO).
+      var vbeam = -1;
+      for (var vc = hv.cols.out + 1; vc < g[hv.row].length; vc++) {
+        if (/^beam\s*no$/.test(low(g[hv.row][vc]))) { vbeam = vc; break; }
+      }
+      if (vbeam >= 0) {
+        for (var r2 = hv.row + 1; r2 < g.length; r2++) {
+          var vn = norm(g[r2][hv.cols.out]);
+          var vb = norm(g[r2][vbeam]);
+          if (!vn && !vb) break;
+          if (!vb) continue;
+          vendor.push({ vendor: vn, beamNo: vb });
+        }
       }
     }
 

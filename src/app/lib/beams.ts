@@ -108,11 +108,6 @@ export function canonicalBeamId(raw: string): string {
   return s.toUpperCase();
 }
 
-/** True when a master "location" string denotes our own premises (not a vendor). */
-function isInSat(location: string): boolean {
-  return /^\s*in\s*sat\s*$/i.test(String(location ?? ""));
-}
-
 function titleCaseVendor(v: string): string {
   const s = String(v ?? "").trim();
   if (!s) return "";
@@ -120,13 +115,13 @@ function titleCaseVendor(v: string): string {
 }
 
 /**
- * Collapse the four overlapping tables into one canonical beam list.
- *
- * State resolution per asset, most-specific wins:
- *   1. in Loaded table                          → loaded
- *   2. in Vendor table OR master loc = a vendor → vendor
- *   3. in Empty list                            → empty
- *   4. otherwise (in SAT, idle)                 → ready  (inferred)
+ * Collapse the four sheet tables into one canonical beam list. Each lifecycle
+ * state is read strictly from its own explicit table — we follow the sheet as
+ * maintained and never infer a beam's state from the master location list:
+ *   1. Loaded table   → loaded
+ *   2. OUT SIDE table  → vendor
+ *   3. EMPTY BEAM list → empty
+ *   4. READY warp list → ready  (the sheet records no beam id for these)
  */
 export function normalizeBeams(data: BeamSheetData): BeamRegisterData {
   const beams = new Map<string, Beam>();
@@ -175,21 +170,6 @@ export function normalizeBeams(data: BeamSheetData): BeamRegisterData {
     });
   }
 
-  // 2b. Vendor — master rows whose location is a vendor (not "in SAT").
-  for (const r of data.master) {
-    const id = canonicalBeamId(r.beamNo);
-    if (!id || beams.has(id)) continue;
-    if (isInSat(r.location)) continue; // handled below as ready/empty
-    const vendor = titleCaseVendor(r.location);
-    claim(id, r.beamNo, {
-      id,
-      rawId: String(r.beamNo).trim(),
-      state: "vendor",
-      location: vendor || "Vendor",
-      vendor: vendor || undefined,
-    });
-  }
-
   // 3. Empty — explicit EMPTY BEAM list.
   for (const r of data.empty) {
     const id = canonicalBeamId(r.beamNo);
@@ -202,7 +182,9 @@ export function normalizeBeams(data: BeamSheetData): BeamRegisterData {
     });
   }
 
-  // 4. Ready by elimination — master in-SAT beams not yet classified.
+  // 4. Ready — straight from the READY (LOAD WARP IN SAT) table. The sheet
+  // does not record a physical beam id for a ready warp, so each warp becomes a
+  // ready beam keyed by its beam id when known, else by its design.
   const readyWarps: ReadyWarp[] = data.ready
     .map((r) => ({
       design: String(r.design || "").trim(),
@@ -211,48 +193,30 @@ export function normalizeBeams(data: BeamSheetData): BeamRegisterData {
     }))
     .filter((w) => w.design);
 
-  for (const r of data.master) {
-    const id = canonicalBeamId(r.beamNo);
-    if (!id || beams.has(id)) continue;
-    if (!isInSat(r.location)) continue;
-    claim(id, r.beamNo, {
+  readyWarps.forEach((w, i) => {
+    const base = w.beamId || w.design || `Ready ${i + 1}`;
+    let id = base;
+    let n = 2;
+    while (beams.has(id)) id = `${base} (${n++})`;
+    beams.set(id, {
       id,
-      rawId: String(r.beamNo).trim(),
+      rawId: w.beamId || "",
       state: "ready",
       location: IN_SAT,
-      inferred: true,
+      design: w.design || undefined,
+      meters: w.meters,
+      inferred: !w.beamId,
     });
-  }
-
-  // Attach designs/meters from ready warps onto the inferred ready beams, in
-  // order, where a 1:1 link is plausible. We never fabricate a mapping the
-  // sheet can't support, so this only fills when counts line up; otherwise the
-  // beams keep an empty design and the integrity report flags the gap.
-  const readyBeams = [...beams.values()].filter((b) => b.state === "ready");
-  if (readyBeams.length === readyWarps.length) {
-    readyBeams.forEach((b, i) => {
-      const w = readyWarps[i];
-      b.design = w.design;
-      b.meters = w.meters;
-    });
-  }
+  });
 
   const counts: Record<BeamState, number> = { vendor: 0, ready: 0, loaded: 0, empty: 0 };
   for (const b of beams.values()) counts[b.state] += 1;
 
   const readyBeamCount = counts.ready;
   const readyWarpCount = readyWarps.length;
-  const unmappedWarps = Math.max(0, readyWarpCount - readyBeamCount);
-  const unaccountedBeams = Math.max(0, readyBeamCount - readyWarpCount);
+  const unmappedWarps = 0;
+  const unaccountedBeams = 0;
   const notes: string[] = [];
-  if (unmappedWarps > 0)
-    notes.push(
-      `${unmappedWarps} ready warp(s) have no beam in the sheet — beam id is captured only when the warp is loaded.`,
-    );
-  if (unaccountedBeams > 0)
-    notes.push(
-      `${unaccountedBeams} idle in-SAT beam(s) are not matched to any ready warp — possible data gap in the sheet.`,
-    );
 
   const sorted = [...beams.values()].sort((a, b) => compareBeamId(a.id, b.id));
 
