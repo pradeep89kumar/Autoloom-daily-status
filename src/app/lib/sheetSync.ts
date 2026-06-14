@@ -39,7 +39,19 @@ export interface LoadingPayload {
   resumedFromRunout?: boolean;
 }
 
-export type SheetPayload = ProductionEntryPayload | LoadingPayload;
+export interface VisitPayload {
+  kind: "visit";
+  capturedAt: string;
+  country: string;
+  region: string;
+  city: string;
+  latitude: string;
+  longitude: string;
+  path: string;
+  userAgent: string;
+}
+
+export type SheetPayload = ProductionEntryPayload | LoadingPayload | VisitPayload;
 
 const ENDPOINT = import.meta.env.VITE_SHEET_WEBHOOK_URL as string | undefined;
 
@@ -67,6 +79,27 @@ export async function submitToSheet(p: SheetPayload): Promise<{ ok: boolean }> {
 export function submitLoadingToSheet(p: LoadingPayload): void {
   // fire-and-forget; loading events are notification-only, never block the UI
   void submitToSheet(p);
+}
+
+export async function logVisit(): Promise<void> {
+  // Best-effort access logging — geo comes from the Vercel edge function, which
+  // only returns real data on the deployed domain. Never disrupt the app.
+  try {
+    const g = await fetch("/api/geo").then((r) => r.json());
+    void submitToSheet({
+      kind: "visit",
+      capturedAt: new Date().toISOString(),
+      country: g.country ?? "",
+      region: g.region ?? "",
+      city: g.city ?? "",
+      latitude: g.latitude ?? "",
+      longitude: g.longitude ?? "",
+      path: window.location.pathname,
+      userAgent: navigator.userAgent,
+    });
+  } catch {
+    /* ignore — visit logging must not affect the user */
+  }
 }
 
 export interface CapturedRow {

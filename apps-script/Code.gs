@@ -42,6 +42,9 @@ var MASTER_CAPEX_TAB = "Capex Register";
 var BEAM_SHEET_ID = "1sHQIkVJcB-QfuuFVCWo16WpNjlZtLFFne5v4XvcF2YI";
 var BEAM_TAB = "R.O STATUS";
 
+// Visit log — access tracking (country/region/city/lat/long) appended on each session.
+var VISITS_TAB = "Visits";
+
 // Capex Register columns (1-indexed, A..G only — only G-and-left are critical):
 //  A Date · B Project · C Expense · D Vendor · E Amount · F Paid From · G Funding Source
 var CAPEX_WIDTH         = 7;
@@ -192,10 +195,37 @@ function doPost(e) {
   if (p.kind === "production")  return _appendProduction(p);
   if (p.kind === "loading")     return _logLoading(p);
   if (p.kind === "edit")        return _editProduction(p);
+  if (p.kind === "visit")       return _logVisit(p);
   return _json({ ok: false, error: "unknown kind" });
 }
 
 /* ------------------------------ writers ------------------------------ */
+
+function _visitsSheet() {
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var sh = ss.getSheetByName(VISITS_TAB);
+  if (!sh) {
+    sh = ss.insertSheet(VISITS_TAB);
+    sh.appendRow(["Captured at", "Country", "Region", "City", "Latitude", "Longitude", "Path", "User agent"]);
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
+function _logVisit(p) {
+  var sh = _visitsSheet();
+  sh.appendRow([
+    p.capturedAt || new Date().toISOString(), // A
+    p.country   || "",                        // B
+    p.region    || "",                        // C
+    p.city      || "",                        // D
+    p.latitude  || "",                        // E
+    p.longitude || "",                        // F
+    p.path      || "",                        // G
+    p.userAgent || "",                        // H
+  ]);
+  return _json({ ok: true });
+}
 
 function _appendProduction(p) {
   var sh = _sheet();
