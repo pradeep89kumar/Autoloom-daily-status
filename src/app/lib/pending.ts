@@ -22,7 +22,7 @@ export interface PendingDetectionInput {
 }
 
 /** Tool went live on this date. Slots before this are never surfaced. */
-const ROLLOUT_FLOOR = new Date(2026, 5, 7); // 7 Jun 2026, local time
+const ROLLOUT_FLOOR = new Date(2026, 5, 15); // 15 Jun 2026, local time
 
 /**
  * Compute pending and late slots:
