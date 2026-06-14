@@ -277,6 +277,6 @@ export const BEAM_STATE_META: Record<
 > = {
   vendor: { label: "Warping", tamil: "வார்ப்பிங்", token: "var(--color-status-amber)" },
   ready: { label: "Ready", tamil: "தயார்", token: "var(--color-status-green)" },
-  loaded: { label: "Loaded", tamil: "ஏற்றியது", token: "var(--color-brand-primary)" },
+  loaded: { label: "Loaded", tamil: "ஓடுகிறது", token: "var(--color-brand-primary)" },
   empty: { label: "Empty", tamil: "காலி", token: "var(--color-text-tertiary)" },
 };

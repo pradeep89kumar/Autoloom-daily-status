@@ -108,7 +108,7 @@ export function BeamRegister() {
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Find a beam — VVK-4, design, vendor…"
+                placeholder="Find a beam — SAT-1, design, vendor, customer"
                 className="w-full h-10 pl-9 pr-9 rounded-full border-0 text-[14px] bg-[var(--color-bg-base)] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-tertiary)] focus:outline-none focus:ring-2 focus:ring-[color-mix(in_srgb,var(--color-brand-primary)_30%,white)] focus:bg-white"
               />
               {searching && (
@@ -148,17 +148,17 @@ function BeamError({ onRetry }: { onRetry: () => void }) {
     <div className="px-6 py-16 flex flex-col items-center text-center">
       <CloudSlash className="w-12 h-12 text-[var(--color-text-tertiary)]" weight="duotone" />
       <h3 className="mt-4 text-[15px] font-bold text-[var(--color-text-primary)]">
-        Beam data not connected yet
+        பீம் தரவு இன்னும் இணைக்கப்படவில்லை
       </h3>
       <p className="mt-1.5 text-[13px] text-[var(--color-text-secondary)] leading-relaxed max-w-[260px]">
-        The beam sheet sync is not set up. Beam tracking will appear here once the backend is configured.
+        பீம் ஷீட் ஒத்திசைவு இன்னும் அமைக்கப்படவில்லை. பின்தளம் தயாரானதும் பீம் கண்காணிப்பு இங்கே தோன்றும்.
       </p>
       <button
         onClick={onRetry}
         className="mt-5 inline-flex items-center gap-1.5 px-4 h-10 rounded-lg border border-[var(--color-border-hairline)] text-[14px] font-semibold text-[var(--color-text-primary)] hover:bg-gray-50"
       >
         <ArrowClockwise className="w-4 h-4" weight="bold" />
-        Retry
+        மீண்டும் முயற்சி
       </button>
     </div>
   );
@@ -189,7 +189,7 @@ function FloorStrip({
       {/* lifecycle header — label left, All-beams browse toggle right */}
       <div className="flex items-center justify-between mb-2">
         <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-tertiary)]">
-          Beam lifecycle
+          பீம் நிலை
         </span>
         <button
           onClick={() => onSelect("all")}
@@ -264,7 +264,7 @@ function StageChip({
         className="text-[10px] font-semibold leading-none text-center"
         style={{ color: active ? "rgba(255,255,255,0.9)" : "var(--color-text-secondary)" }}
       >
-        {meta.label}
+        {meta.tamil}
       </span>
     </button>
   );
@@ -328,14 +328,13 @@ function ReadySection({ data }: { data: BeamRegisterData }) {
       {/* Derivation note — how the ready list is arrived at. */}
       <div className="mb-3 rounded-lg bg-[color-mix(in_srgb,var(--color-status-green)_7%,white)] border border-[color-mix(in_srgb,var(--color-status-green)_28%,white)] px-3 py-2.5">
         <p className="text-[12px] text-[var(--color-text-secondary)] leading-relaxed">
-          Ready to load is derived from the master list: any beam in SAT that is not
-          loaded on a loom, empty, or out warping. These assets are available to take
-          the next warp.
+          மாஸ்டர் பட்டியலில் இருந்து கணக்கிடப்படுகிறது: SAT-ல் உள்ள, தறியில் ஏற்றப்படாத, காலியாக இல்லாத,
+          வார்ப்பிங்கில் இல்லாத எந்த பீமும். இவை அடுத்த வார்ப்பை ஏற்க தயார்.
         </p>
       </div>
 
       {ready.length === 0 ? (
-        <Empty label="No beams ready to load" />
+        <Empty label="ஏற்ற தயாரான பீம் இல்லை" />
       ) : (
         <div className="flex flex-col gap-2">
           {ready.map((b) => (
@@ -348,13 +347,13 @@ function ReadySection({ data }: { data: BeamRegisterData }) {
       {warps.length > 0 && (
         <div className="mt-5">
           <div className="flex items-center gap-2 mb-2">
-            <span className="text-[13px] font-bold text-[var(--color-text-primary)]">Warps staged in SAT</span>
+            <span className="text-[13px] font-bold text-[var(--color-text-primary)]">SAT-ல் தயாராக இருக்கும் வார்ப்புகள்</span>
             <span className="text-[11px] font-bold tabular-nums px-1.5 py-0.5 rounded-full bg-[var(--color-bg-base)] text-[var(--color-text-secondary)]">
               {warps.length}
             </span>
           </div>
           <p className="text-[12px] text-[var(--color-text-tertiary)] leading-relaxed mb-2">
-            Warps wound and waiting in SAT. The sheet records no beam id for these yet.
+            SAT-ல் சுற்றி வைக்கப்பட்டு காத்திருக்கும் வார்ப்புகள். இவற்றுக்கு இன்னும் பீம் எண் பதிவாகவில்லை.
           </p>
           <div className="flex flex-col gap-2">
             {warps.map((w, i) => (
@@ -407,7 +406,7 @@ function SearchResults({ matches, onClear }: { matches: Beam[]; onClear: () => v
         </button>
       </div>
       {matches.length === 0 ? (
-        <Empty label="No beam found" />
+        <Empty label="முடிவுகள் இல்லை" />
       ) : (
         <div className="flex flex-col gap-2">
           {matches.map((b) => (
@@ -425,7 +424,7 @@ function SectionHeader({ state, count }: { state: BeamState; count: number }) {
   return (
     <div className="flex items-center gap-2 mb-2.5 mt-1">
       <StateIcon style={{ color: meta.token, width: 16, height: 16 }} weight="fill" />
-      <span className="text-[14px] font-bold text-[var(--color-text-primary)]">{meta.label}</span>
+      <span className="text-[14px] font-bold text-[var(--color-text-primary)]">{meta.tamil}</span>
       <span
         className="text-[11px] font-bold tabular-nums px-1.5 py-0.5 rounded-full"
         style={{ background: `color-mix(in srgb, ${meta.token} 14%, white)`, color: meta.token }}
@@ -508,7 +507,7 @@ function BeamCard({ beam, showState, onVendorTap }: { beam: Beam; showState?: bo
               {showState && <StateBadge meta={meta} StateIcon={StateIcon} />}
             </div>
             <div className="text-[12px] text-[var(--color-text-secondary)] mt-0.5 truncate">
-              {beam.design ? "Ready to load" : subtitle(beam)}
+              {beam.design ? "ஏற்ற தயார்" : subtitle(beam)}
             </div>
           </>
         )}
@@ -538,14 +537,14 @@ function BeamCard({ beam, showState, onVendorTap }: { beam: Beam; showState?: bo
   );
 }
 
-function StateBadge({ meta, StateIcon }: { meta: { label: string; token: string }; StateIcon: Icon }) {
+function StateBadge({ meta, StateIcon }: { meta: { tamil: string; token: string }; StateIcon: Icon }) {
   return (
     <span
       className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full inline-flex items-center gap-1"
       style={{ background: `color-mix(in srgb, ${meta.token} 14%, white)`, color: meta.token }}
     >
       <StateIcon style={{ width: 11, height: 11 }} weight="fill" />
-      {meta.label}
+      {meta.tamil}
     </span>
   );
 }
@@ -555,11 +554,11 @@ function subtitle(b: Beam): string {
     case "loaded":
       return [b.design, b.customer, b.roDate ? `R.O ${b.roDate}` : ""].filter(Boolean).join(" · ") || "Running";
     case "ready":
-      return b.design || "Warped · ready to load";
+      return b.design || "ஏற்ற தயார்";
     case "vendor":
-      return "Being warped";
+      return "வார்ப்பிங்கில் உள்ளது";
     case "empty":
-      return "Run out · needs re-warp";
+      return "Run out";
   }
 }
 
@@ -573,7 +572,7 @@ function ReadyWarpCard({ warp }: { warp: ReadyWarp }) {
       <div className="min-w-0">
         <div className="text-[15px] font-bold text-[var(--color-text-primary)] truncate">{warp.design}</div>
         <div className="text-[12px] text-[var(--color-text-secondary)] mt-0.5">
-          {warp.beamId ? `Beam ${warp.beamId}` : "Ready to load"}
+          {warp.beamId ? `Beam ${warp.beamId}` : "ஏற்ற தயார்"}
         </div>
       </div>
       {warp.meters != null && (
