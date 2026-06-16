@@ -322,15 +322,11 @@ export function PartnerReceivables() {
                           )}
                         </p>
                         <p className="mt-0.5 text-[14px] text-[var(--color-text-secondary)] tabular-nums">
-                          {fmtDate(r.invoiceDate)} → {fmtDate(r.dueDate)}
+                          Inv {fmtDate(r.invoiceDate)}   ·   Due {fmtDate(r.dueDate)}
                         </p>
-                        <div className="mt-1.5 flex items-baseline justify-between gap-2">
-                          <span className="text-[14px] text-[var(--color-text-secondary)] tabular-nums">
-                            Inv {fmtRupees(r.invoiceAmount)}
-                            {r.receipts > 0 && <> · Recd {fmtRupees(r.receipts)}</>}
-                          </span>
+                        <div className="mt-1.5 flex justify-end">
                           <span className="text-[18px] font-bold tabular-nums text-[var(--color-text-primary)]">
-                            {fmtRupees(effectivePending(r))}
+                            {fmtRupees(r.invoiceAmount)}
                           </span>
                         </div>
                       </li>
