@@ -204,7 +204,6 @@ export function PartnerReceivables() {
             { k: "overdue", label: "Overdue" },
             { k: "partial", label: "Partial" },
             { k: "unbilled", label: "Unbilled" },
-            { k: "all", label: "All" },
           ] as { k: FilterKey; label: string }[]
         ).map((f) => (
           <button
