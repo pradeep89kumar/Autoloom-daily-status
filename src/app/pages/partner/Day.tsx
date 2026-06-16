@@ -132,7 +132,7 @@ export function PartnerDay() {
       {/* Header brief */}
       {loading ? (
         <SkeletonHeader />
-      ) : (
+      ) : summary.loomsReporting === 0 ? null : (
         <>
           <div className="rounded-xl bg-white border border-[var(--color-border-hairline)] shadow-[0_2px_8px_rgba(0,0,0,0.06)] px-4 py-3.5 mb-5">
             <p className="text-[16px] leading-relaxed text-[var(--color-text-primary)]">
@@ -157,7 +157,7 @@ export function PartnerDay() {
       {/* Per-loom rows */}
       {loading ? (
         <SkeletonRows />
-      ) : looms.length === 0 ? (
+      ) : looms.length === 0 || summary.loomsReporting === 0 ? (
         <EmptyState date={date} inProgress={inProgress} />
       ) : (
         <>
