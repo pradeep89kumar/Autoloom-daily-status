@@ -72,6 +72,7 @@ export function PartnerReceivables() {
   const [rows, setRows] = useState<ReceivableRow[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<FilterKey>("pending");
 
   useEffect(() => {
@@ -208,7 +209,6 @@ export function PartnerReceivables() {
             { k: "pending", label: "Pending" },
             { k: "overdue", label: "Overdue" },
             { k: "partial", label: "Partial" },
-            { k: "unbilled", label: "Unbilled" },
           ] as { k: FilterKey; label: string }[]
         ).map((f) => (
           <button
@@ -267,7 +267,20 @@ export function PartnerReceivables() {
 
       <ul className="flex flex-col gap-3">
         {grouped.map((g) => {
-          const isOpen = expanded === g.party;
+          const isOpen =
+            filter === "overdue" ? !collapsed.has(g.party) : expanded === g.party;
+          const toggle = () => {
+            if (filter === "overdue") {
+              setCollapsed((prev) => {
+                const next = new Set(prev);
+                if (next.has(g.party)) next.delete(g.party);
+                else next.add(g.party);
+                return next;
+              });
+            } else {
+              setExpanded(isOpen ? null : g.party);
+            }
+          };
           return (
             <li
               key={g.party}
@@ -278,7 +291,7 @@ export function PartnerReceivables() {
               }`}
             >
               <button
-                onClick={() => setExpanded(isOpen ? null : g.party)}
+                onClick={toggle}
                 className="w-full px-4 py-3.5 flex items-center justify-between text-left"
               >
                 <div className="min-w-0">
