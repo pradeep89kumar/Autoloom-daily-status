@@ -589,6 +589,8 @@ function _readMasterReceivables() {
   var cPaaguId = findCol(["Paagu ID", "Paagu"], 1);
   var cCustomerName = findCol(["Customer Name", "Design Details"], 2);
   var cStatus = findCol(["Status"], 4);
+  // Looms Allocated lives in column K (index 10) — read by header, but force the
+  // column-K fallback when the header lookup returns the same fixed position.
   var cLoadedLoom = findCol(["Looms Allocated", "Loaded Loom", "Loom Allocated"], 10);
   var cInvoiceAmount = findCol(["Invoice amount"], 26);
   var cInvoiceNumber = findCol(["Invoice number"], 27);

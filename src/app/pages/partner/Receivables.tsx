@@ -15,7 +15,17 @@ function fromYmd(s: string): Date | null {
 function fmtDate(s: string): string {
   const d = fromYmd(s);
   if (!d) return "—";
-  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "2-digit" });
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yy = String(d.getFullYear()).slice(-2);
+  return `${dd}/${mm}/${yy}`;
+}
+
+/** Loom display: bare number "6" → "L6"; already-prefixed "L6" stays as-is. */
+function fmtLoom(raw?: string): string {
+  const t = (raw || "").trim();
+  if (!t) return "";
+  return /^\d+$/.test(t) ? `L${t}` : t.toUpperCase();
 }
 
 function ageDays(s: string): number | null {
@@ -297,7 +307,7 @@ export function PartnerReceivables() {
                       >
                         <div className="flex items-baseline justify-between gap-2">
                           <p className="text-[16px] font-semibold text-[var(--color-text-primary)] truncate">
-                            {r.invoiceNumber || r.paaguId || r.customerName || r.designDetails || r.loadedLoom || r.loomNumber || r.orderId || "—"}
+                            {r.invoiceNumber || r.customerName || r.designDetails || "—"}
                           </p>
                           <span
                             className={`text-[13px] font-semibold px-2 py-0.5 rounded-full ${badge.cls}`}
@@ -305,13 +315,15 @@ export function PartnerReceivables() {
                             {badge.label}
                           </span>
                         </div>
-                        <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[14px] text-[var(--color-text-secondary)]">
-                          <span>Inv {fmtDate(r.invoiceDate)}</span>
-                          <span>Due {fmtDate(r.dueDate)}</span>
-                          <span>Customer · {r.customerName || r.designDetails || "—"}</span>
-                          <span>Looms Allocated · {r.loadedLoom || r.loomNumber || "—"}</span>
-                          <span>Paagu · {r.paaguId || "—"}</span>
-                        </div>
+                        <p className="mt-1 text-[14px] text-[var(--color-text-secondary)] truncate">
+                          {r.customerName || r.designDetails || "—"}
+                          {fmtLoom(r.loadedLoom || r.loomNumber) && (
+                            <span className="text-[var(--color-text-tertiary)]"> · {fmtLoom(r.loadedLoom || r.loomNumber)}</span>
+                          )}
+                        </p>
+                        <p className="mt-0.5 text-[14px] text-[var(--color-text-secondary)] tabular-nums">
+                          {fmtDate(r.invoiceDate)} → {fmtDate(r.dueDate)}
+                        </p>
                         <div className="mt-1.5 flex items-baseline justify-between gap-2">
                           <span className="text-[14px] text-[var(--color-text-secondary)] tabular-nums">
                             Inv {fmtRupees(r.invoiceAmount)}
