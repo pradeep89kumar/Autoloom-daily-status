@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
-import { WarningCircle, Check, Clock, Users } from "@phosphor-icons/react";
+import { WarningCircle, Check, Clock, ArrowLeft } from "@phosphor-icons/react";
 import { LOOM_CATALOG, isNewLoom } from "../../lib/looms";
 import { NewPill } from "../../components/NewPill";
 
@@ -158,10 +158,10 @@ export function LoomFloor() {
       <div className="px-4 py-2.5 border-b border-[var(--color-border-hairline)] flex items-center justify-between gap-2">
         <button
           onClick={() => navigate("/role")}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[var(--color-border-hairline)] text-sm hover:bg-gray-50"
+          className="p-2 -ml-2 text-[var(--color-text-primary)]"
+          aria-label="Switch profile"
         >
-          <Users className="w-4 h-4" weight="bold" />
-          Switch
+          <ArrowLeft className="w-5 h-5" weight="bold" />
         </button>
         <button
           onClick={() => navigate("/supervisor/logs")}
