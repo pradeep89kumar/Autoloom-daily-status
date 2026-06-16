@@ -560,7 +560,7 @@ function _readMasterOrders() {
 
 /**
  * Master tab "Paagu ID" — receivables view.
- * Cols: A Order ID · B Paagu ID · C Customer Name · E Status
+ * Cols: A Order ID · B Paagu ID · C Design Details · E Status · K Loom Number
  *  AA Invoice amount · AB Invoice number · AC Invoice date · AD Due date
  *  AE Receipts · AF Received On · AG Payment status
  *  AN Pending Balance · AP Party
@@ -576,16 +576,19 @@ function _readMasterReceivables() {
     var r = values[i];
     var party = String(r[41] || "").trim();
     if (!party) continue;
-    var orderId = String(r[0] || "").trim();
+    var orderId = String(r[0] || "").trim(); // retained for backward compatibility
     var paaguId = String(r[1] || "").trim();
+    var designDetails = String(r[2] || "").trim();
+    var loomNumber = String(r[10] || "").trim();
     var pending = Number(r[39]) || 0;
     var invoiceAmount = Number(r[26]) || 0;
     var invoiceNumber = String(r[27] || "").trim();
-    if (!invoiceNumber && !pending && !invoiceAmount && !orderId && !paaguId) continue;
+    if (!invoiceNumber && !pending && !invoiceAmount && !designDetails && !paaguId) continue;
     out.push({
       orderId: orderId,
       paaguId: paaguId,
-      customerName: String(r[2] || ""),
+      designDetails: designDetails,
+      loomNumber: loomNumber,
       status: String(r[4] || ""),
       invoiceAmount: invoiceAmount,
       invoiceNumber: invoiceNumber,

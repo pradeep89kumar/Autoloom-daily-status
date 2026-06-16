@@ -130,8 +130,11 @@ export function PartnerReceivables() {
       if (bRcv > aRcv && r.receivedOn) prev.receivedOn = r.receivedOn;
       if (!prev.paymentStatus && r.paymentStatus) prev.paymentStatus = r.paymentStatus;
       if (!prev.status && r.status) prev.status = r.status;
-      if (prev.orderId && r.orderId && !prev.orderId.includes(r.orderId)) {
-        prev.orderId = `${prev.orderId}, ${r.orderId}`;
+      if (prev.designDetails && r.designDetails && !prev.designDetails.includes(r.designDetails)) {
+        prev.designDetails = `${prev.designDetails}, ${r.designDetails}`;
+      }
+      if (prev.loomNumber && r.loomNumber && !prev.loomNumber.includes(r.loomNumber)) {
+        prev.loomNumber = `${prev.loomNumber}, ${r.loomNumber}`;
       }
       if (prev.paaguId && r.paaguId && !prev.paaguId.includes(r.paaguId)) {
         prev.paaguId = `${prev.paaguId}, ${r.paaguId}`;
@@ -290,7 +293,7 @@ export function PartnerReceivables() {
                       >
                         <div className="flex items-baseline justify-between gap-2">
                           <p className="text-[16px] font-semibold text-[var(--color-text-primary)] truncate">
-                            {r.invoiceNumber || r.paaguId || r.orderId || "—"}
+                            {r.invoiceNumber || r.paaguId || r.designDetails || r.loomNumber || r.orderId || "—"}
                           </p>
                           <span
                             className={`text-[13px] font-semibold px-2 py-0.5 rounded-full ${badge.cls}`}
@@ -301,7 +304,8 @@ export function PartnerReceivables() {
                         <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[14px] text-[var(--color-text-secondary)]">
                           <span>Inv {fmtDate(r.invoiceDate)}</span>
                           <span>Due {fmtDate(r.dueDate)}</span>
-                          <span>Order · {r.orderId || "—"}</span>
+                          <span>Design · {r.designDetails || "—"}</span>
+                          <span>Loom · {r.loomNumber || "—"}</span>
                           <span>Paagu · {r.paaguId || "—"}</span>
                         </div>
                         <div className="mt-1.5 flex items-baseline justify-between gap-2">
