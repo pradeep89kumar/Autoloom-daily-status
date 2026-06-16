@@ -227,7 +227,7 @@ export function PartnerReceivables() {
 
       <div className="rounded-xl border border-[var(--color-border-hairline)] p-4 mb-4">
         <p className="text-[13px] font-semibold text-[var(--color-text-secondary)] uppercase tracking-wide">
-          Total {filter === "all" ? "" : filter} pending
+          {filter === "pending" ? "Total pending" : `Total ${filter}`}
         </p>
         {loading ? (
           <>

@@ -101,9 +101,11 @@ export function PartnerDay() {
           <CaretLeft className="w-5 h-5" weight="bold" />
         </button>
         <label className="relative inline-flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-black/[0.03] cursor-pointer">
-          <span className="text-[14px] text-[var(--color-text-secondary)] leading-none">
-            {dateLabel(date)}
-          </span>
+          {(dateLabel(date) === "இன்று" || dateLabel(date) === "நேற்று") && (
+            <span className="text-[14px] text-[var(--color-text-secondary)] leading-none">
+              {dateLabel(date)}
+            </span>
+          )}
           <span className="text-[16px] font-semibold text-[var(--color-text-primary)] tabular-nums leading-none">
             {shortDateLong(date)}
           </span>
