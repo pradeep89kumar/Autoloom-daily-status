@@ -560,7 +560,7 @@ function _readMasterOrders() {
 
 /**
  * Master tab "Paagu ID" — receivables view.
- * Cols: A Order ID · B Paagu ID · C Design Details · E Status · K Loom Number
+ * Cols: A Order ID · B Paagu ID · C Customer Name · E Status · Loaded Loom
  *  AA Invoice amount · AB Invoice number · AC Invoice date · AD Due date
  *  AE Receipts · AF Received On · AG Payment status
  *  AN Pending Balance · AP Party
@@ -570,33 +570,65 @@ function _readMasterReceivables() {
   if (!sh) return [];
   var last = sh.getLastRow();
   if (last < 2) return [];
+  var width = sh.getLastColumn();
+  var header = sh.getRange(1, 1, 1, width).getValues()[0];
+  var normHeader = function (s) { return String(s || "").toLowerCase().replace(/[^a-z0-9]/g, ""); };
+  var headerNorm = [];
+  for (var h = 0; h < header.length; h++) headerNorm.push(normHeader(header[h]));
+  var findCol = function (aliases, fallbackIdx) {
+    for (var a = 0; a < aliases.length; a++) {
+      var want = normHeader(aliases[a]);
+      for (var c = 0; c < headerNorm.length; c++) {
+        if (headerNorm[c] === want) return c;
+      }
+    }
+    return fallbackIdx;
+  };
+
+  var cOrderId = findCol(["Order ID"], 0);
+  var cPaaguId = findCol(["Paagu ID", "Paagu"], 1);
+  var cCustomerName = findCol(["Customer Name", "Design Details"], 2);
+  var cStatus = findCol(["Status"], 4);
+  var cLoadedLoom = findCol(["Loaded Loom", "Looms Allocated", "Loom Allocated"], 10);
+  var cInvoiceAmount = findCol(["Invoice amount"], 26);
+  var cInvoiceNumber = findCol(["Invoice number"], 27);
+  var cInvoiceDate = findCol(["Invoice date"], 28);
+  var cDueDate = findCol(["Due date"], 29);
+  var cReceipts = findCol(["Receipts"], 30);
+  var cReceivedOn = findCol(["Received On"], 31);
+  var cPaymentStatus = findCol(["Payment status"], 32);
+  var cPendingBalance = findCol(["Pending Balance"], 39);
+  var cParty = findCol(["Party"], 41);
+
   var values = sh.getRange(2, 1, last - 1, 42).getValues(); // A..AP
   var out = [];
   for (var i = 0; i < values.length; i++) {
     var r = values[i];
-    var party = String(r[41] || "").trim();
+    var party = String(r[cParty] || "").trim();
     if (!party) continue;
-    var orderId = String(r[0] || "").trim(); // retained for backward compatibility
-    var paaguId = String(r[1] || "").trim();
-    var designDetails = String(r[2] || "").trim();
-    var loomNumber = String(r[10] || "").trim();
-    var pending = Number(r[39]) || 0;
-    var invoiceAmount = Number(r[26]) || 0;
-    var invoiceNumber = String(r[27] || "").trim();
-    if (!invoiceNumber && !pending && !invoiceAmount && !designDetails && !paaguId) continue;
+    var orderId = String(r[cOrderId] || "").trim(); // retained for backward compatibility
+    var paaguId = String(r[cPaaguId] || "").trim();
+    var customerName = String(r[cCustomerName] || "").trim();
+    var loadedLoom = String(r[cLoadedLoom] || "").trim();
+    var pending = Number(r[cPendingBalance]) || 0;
+    var invoiceAmount = Number(r[cInvoiceAmount]) || 0;
+    var invoiceNumber = String(r[cInvoiceNumber] || "").trim();
+    if (!invoiceNumber && !pending && !invoiceAmount && !customerName && !paaguId) continue;
     out.push({
       orderId: orderId,
       paaguId: paaguId,
-      designDetails: designDetails,
-      loomNumber: loomNumber,
-      status: String(r[4] || ""),
+      customerName: customerName,
+      loadedLoom: loadedLoom,
+      designDetails: customerName, // backward-compatible alias consumed by older UI
+      loomNumber: loadedLoom,      // backward-compatible alias consumed by older UI
+      status: String(r[cStatus] || ""),
       invoiceAmount: invoiceAmount,
       invoiceNumber: invoiceNumber,
-      invoiceDate: r[28] ? _ymd(_toDate(r[28]) || new Date(r[28])) : "",
-      dueDate: r[29] ? _ymd(_toDate(r[29]) || new Date(r[29])) : "",
-      receipts: Number(r[30]) || 0,
-      receivedOn: r[31] ? _ymd(_toDate(r[31]) || new Date(r[31])) : "",
-      paymentStatus: String(r[32] || "").trim(),
+      invoiceDate: r[cInvoiceDate] ? _ymd(_toDate(r[cInvoiceDate]) || new Date(r[cInvoiceDate])) : "",
+      dueDate: r[cDueDate] ? _ymd(_toDate(r[cDueDate]) || new Date(r[cDueDate])) : "",
+      receipts: Number(r[cReceipts]) || 0,
+      receivedOn: r[cReceivedOn] ? _ymd(_toDate(r[cReceivedOn]) || new Date(r[cReceivedOn])) : "",
+      paymentStatus: String(r[cPaymentStatus] || "").trim(),
       pendingBalance: pending,
       party: party
     });

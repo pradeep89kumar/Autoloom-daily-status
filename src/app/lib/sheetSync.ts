@@ -336,8 +336,10 @@ export async function fetchMasterOrders(): Promise<Record<string, unknown>[]> {
 export interface ReceivableRow {
   orderId?: string;
   paaguId: string;
-  designDetails: string;
-  loomNumber: string;
+  customerName?: string;
+  loadedLoom?: string;
+  designDetails?: string;
+  loomNumber?: string;
   status: string;
   invoiceAmount: number;
   invoiceNumber: string;
