@@ -158,17 +158,22 @@ export function PartnerReceivables() {
   }, [filtered]);
 
   const grouped = useMemo(() => {
-    const map = new Map<string, { party: string; total: number; count: number; rows: ReceivableRow[] }>();
+    const map = new Map<string, { party: string; total: number; count: number; overdue: number; rows: ReceivableRow[] }>();
     for (const r of merged) {
       const key = (r.party || "").trim();
       if (!key) continue;
       let g = map.get(key);
       if (!g) {
-        g = { party: key, total: 0, count: 0, rows: [] };
+        g = { party: key, total: 0, count: 0, overdue: 0, rows: [] };
         map.set(key, g);
       }
       g.total += effectivePending(r);
       g.count += 1;
+      const kind = statusKind(r);
+      const od = ageDays(r.dueDate);
+      if (kind !== "paid" && kind !== "unbilled" && od !== null && od > 0 && effectivePending(r) > 0) {
+        g.overdue += 1;
+      }
       g.rows.push(r);
     }
     const list = Array.from(map.values());
@@ -260,26 +265,37 @@ export function PartnerReceivables() {
         </p>
       )}
 
-      <ul className="flex flex-col gap-2">
+      <ul className="flex flex-col gap-3">
         {grouped.map((g) => {
           const isOpen = expanded === g.party;
           return (
             <li
               key={g.party}
-              className="rounded-xl border border-[var(--color-border-hairline)] bg-white"
+              className={`rounded-xl border bg-white overflow-hidden transition-shadow ${
+                isOpen
+                  ? "border-[var(--color-text-primary)]/15 shadow-md"
+                  : "border-[var(--color-border-hairline)] shadow-sm"
+              }`}
             >
               <button
                 onClick={() => setExpanded(isOpen ? null : g.party)}
-                className="w-full px-4 py-3 flex items-center justify-between text-left"
+                className="w-full px-4 py-3.5 flex items-center justify-between text-left"
               >
                 <div className="min-w-0">
-                  <p className="text-[16px] font-semibold text-[var(--color-text-primary)] truncate">{g.party}</p>
-                  <p className="text-[14px] text-[var(--color-text-secondary)] mt-0.5">
-                    {g.count} {g.count === 1 ? "invoice" : "invoices"}
-                  </p>
+                  <p className="text-[18px] font-bold text-[var(--color-text-primary)] truncate">{g.party}</p>
+                  <div className="mt-1 flex items-center gap-2">
+                    <span className="text-[14px] text-[var(--color-text-secondary)]">
+                      {g.count} {g.count === 1 ? "invoice" : "invoices"}
+                    </span>
+                    {g.overdue > 0 && (
+                      <span className="text-[12px] font-semibold px-2 py-0.5 rounded-full bg-red-100 text-red-700">
+                        {g.overdue} overdue
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <span className="text-[18px] font-bold tabular-nums text-[var(--color-text-primary)]">{fmtRupees(g.total)}</span>
+                  <span className="text-[18px] font-bold tabular-nums text-[var(--color-brand-primary)]">{fmtRupees(g.total)}</span>
                   {isOpen ? (
                     <CaretUp
                       className="w-4 h-4 text-[var(--color-text-secondary)]"
