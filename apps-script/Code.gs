@@ -560,7 +560,7 @@ function _readMasterOrders() {
 
 /**
  * Master tab "Paagu ID" — receivables view.
- * Cols: A Order ID · B Paagu ID · C Customer Name · E Status · Loaded Loom
+ * Cols: A Order ID · B Paagu ID · C Customer Name · E Status · Looms Allocated
  *  AA Invoice amount · AB Invoice number · AC Invoice date · AD Due date
  *  AE Receipts · AF Received On · AG Payment status
  *  AN Pending Balance · AP Party
@@ -589,7 +589,7 @@ function _readMasterReceivables() {
   var cPaaguId = findCol(["Paagu ID", "Paagu"], 1);
   var cCustomerName = findCol(["Customer Name", "Design Details"], 2);
   var cStatus = findCol(["Status"], 4);
-  var cLoadedLoom = findCol(["Loaded Loom", "Looms Allocated", "Loom Allocated"], 10);
+  var cLoadedLoom = findCol(["Looms Allocated", "Loaded Loom", "Loom Allocated"], 10);
   var cInvoiceAmount = findCol(["Invoice amount"], 26);
   var cInvoiceNumber = findCol(["Invoice number"], 27);
   var cInvoiceDate = findCol(["Invoice date"], 28);

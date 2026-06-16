@@ -309,7 +309,7 @@ export function PartnerReceivables() {
                           <span>Inv {fmtDate(r.invoiceDate)}</span>
                           <span>Due {fmtDate(r.dueDate)}</span>
                           <span>Customer · {r.customerName || r.designDetails || "—"}</span>
-                          <span>Loom · {r.loadedLoom || r.loomNumber || "—"}</span>
+                          <span>Looms Allocated · {r.loadedLoom || r.loomNumber || "—"}</span>
                           <span>Paagu · {r.paaguId || "—"}</span>
                         </div>
                         <div className="mt-1.5 flex items-baseline justify-between gap-2">
