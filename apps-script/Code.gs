@@ -479,8 +479,7 @@ function _buildPartnerDailyReport(dateYmd) {
   var rows = _readMasterDay(dateYmd);
   if (!rows.length) {
     // Mirror the Day tab empty state: production for this day is not yet fed.
-    lines.push("⏳ Production not yet entered");
-    lines.push("சூப்பர்வைசர் இன்னும் பதிவு செய்யவில்லை.");
+    lines.push("⏳ சூப்பர்வைசர் இன்னும் பதிவு செய்யவில்லை.");
   } else {
     var meters = 0, revenue = 0, target = 0;
     var looms = {};
