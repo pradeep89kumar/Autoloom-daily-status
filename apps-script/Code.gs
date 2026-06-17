@@ -522,7 +522,7 @@ function _buildPartnerDailyReport(dateYmd) {
 
   // Always nudge to the app — WhatsApp makes the raw URL tappable.
   lines.push("");
-  lines.push("👉 View full report: " + APP_URL);
+  lines.push("👉 Open SAT app: " + APP_URL);
 
   return lines.join("\n");
 }
