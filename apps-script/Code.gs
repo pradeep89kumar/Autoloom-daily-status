@@ -105,6 +105,16 @@ var TWILIO_SID = PropertiesService.getScriptProperties().getProperty("TWILIO_SID
 var TWILIO_AUTH = PropertiesService.getScriptProperties().getProperty("TWILIO_AUTH") || "";
 var TWILIO_FROM = PropertiesService.getScriptProperties().getProperty("TWILIO_FROM") || ""; // e.g. whatsapp:+14155238886
 
+// Ensure a phone number carries the whatsapp: channel prefix Twilio requires.
+// Accepts "+14155238886", "whatsapp:+14155238886", or "14155238886".
+function _waAddr(num) {
+  var s = String(num || "").trim();
+  if (!s) return "";
+  if (s.indexOf("whatsapp:") === 0) return s;
+  if (s.charAt(0) !== "+") s = "+" + s;
+  return "whatsapp:" + s;
+}
+
 function _sheet() {
   return SpreadsheetApp.openById(SHEET_ID).getSheetByName(SHEET_NAME);
 }
@@ -417,7 +427,7 @@ function _waSend(body) {
     UrlFetchApp.fetch("https://api.twilio.com/2010-04-01/Accounts/" + TWILIO_SID + "/Messages.json", {
       method: "post",
       headers: { Authorization: "Basic " + Utilities.base64Encode(TWILIO_SID + ":" + TWILIO_AUTH) },
-      payload: { From: TWILIO_FROM, To: "whatsapp:" + WA_RELAY_NUMBER, Body: body },
+      payload: { From: _waAddr(TWILIO_FROM), To: _waAddr(WA_RELAY_NUMBER), Body: body },
       muteHttpExceptions: true,
     });
   } catch (err) { /* silent */ }
@@ -493,7 +503,7 @@ function diagnoseWhatsApp() {
     {
       method: "post",
       headers: { Authorization: "Basic " + Utilities.base64Encode(TWILIO_SID + ":" + TWILIO_AUTH) },
-      payload: { From: TWILIO_FROM, To: "whatsapp:" + WA_RELAY_NUMBER, Body: "SAT test ✅ " + _istStamp() },
+      payload: { From: _waAddr(TWILIO_FROM), To: _waAddr(WA_RELAY_NUMBER), Body: "SAT test ✅ " + _istStamp() },
       muteHttpExceptions: true,
     }
   );
