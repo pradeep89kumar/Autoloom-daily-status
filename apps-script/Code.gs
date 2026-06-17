@@ -485,17 +485,28 @@ function _buildPartnerDailyReport(dateYmd) {
     lines.push("Revenue " + _inr(revenue) + " · Avg " + eff + "%");
   }
 
+  var cf = _readCashflow();
+  if (cf && isFinite(cf.totalAvailable)) {
+    lines.push("");
+    lines.push("🏦 Total cash available " + _inr(cf.totalAvailable));
+  }
+
+  // Fresh cash-in only — entries recorded for this day. Nothing shown if none.
   var cashIn = _readCashLedger(dateYmd, dateYmd, "", "in");
   if (cashIn.length) {
     var total = 0;
     for (var j = 0; j < cashIn.length; j++) total += cashIn[j].amount;
-    lines.push("");
-    lines.push("💰 Cash in " + _inr(total));
+    lines.push("💰 Cash in today " + _inr(total));
     for (var m = 0; m < cashIn.length; m++) {
       var c = cashIn[m];
       lines.push("• " + (c.description || "—") + " " + _inr(c.amount));
     }
   }
+
+  // Total pending receivables across all open invoices.
+  var pending = _totalPendingReceivables();
+  lines.push("");
+  lines.push("📥 Pending receivables " + _inr(pending));
 
   return lines.join("\n");
 }
@@ -513,6 +524,46 @@ function installDailyReportTrigger() {
     .everyDays(1)
     .inTimezone("Asia/Kolkata")
     .create();
+}
+
+// Grand total of pending receivables — mirrors the partner Receivables tab:
+// merge rows sharing a party+invoice, then sum the effective pending of each.
+function _totalPendingReceivables() {
+  var rows = _readMasterReceivables();
+  var byInv = {};
+  var passthrough = [];
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    var inv = String(r.invoiceNumber || "").trim();
+    if (!inv) { passthrough.push(r); continue; }
+    var key = String(r.party || "").trim() + "||" + inv;
+    if (!byInv[key]) {
+      byInv[key] = {
+        invoiceAmount: r.invoiceAmount || 0,
+        receipts: r.receipts || 0,
+        pendingBalance: r.pendingBalance || 0,
+        paymentStatus: r.paymentStatus || "",
+        status: r.status || ""
+      };
+    } else {
+      byInv[key].invoiceAmount += r.invoiceAmount || 0;
+      byInv[key].receipts += r.receipts || 0;
+      byInv[key].pendingBalance += r.pendingBalance || 0;
+      if (!byInv[key].paymentStatus && r.paymentStatus) byInv[key].paymentStatus = r.paymentStatus;
+      if (!byInv[key].status && r.status) byInv[key].status = r.status;
+    }
+  }
+  var total = 0;
+  for (var k in byInv) total += _effectivePending(byInv[k]);
+  for (var j = 0; j < passthrough.length; j++) total += _effectivePending(passthrough[j]);
+  return total;
+}
+
+function _effectivePending(r) {
+  var s = String(r.paymentStatus || r.status || "").toLowerCase();
+  if (s.indexOf("paid") >= 0 && s.indexOf("partial") < 0 && s.indexOf("unpaid") < 0) return 0;
+  if (r.invoiceAmount > 0) return Math.max(0, r.invoiceAmount - (r.receipts || 0));
+  return r.pendingBalance || 0;
 }
 
 /* ------------------------------ master workbook (Partner) ------------------------------ */
