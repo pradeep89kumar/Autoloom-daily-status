@@ -473,6 +473,34 @@ function testDailyPartnerReport() {
   _waSend(_buildPartnerDailyReport(_ymd(d)));
 }
 
+// Diagnostic — run this and open View → Logs (or Executions). It prints the
+// exact Twilio response so a failed send is no longer silent. Checks creds,
+// then attempts a one-line test message to WA_RELAY_NUMBER.
+function diagnoseWhatsApp() {
+  Logger.log("WA_ENABLED: " + WA_ENABLED);
+  Logger.log("TWILIO_SID set: " + (TWILIO_SID ? "yes (" + TWILIO_SID.slice(0, 6) + "…)" : "NO"));
+  Logger.log("TWILIO_AUTH set: " + (TWILIO_AUTH ? "yes" : "NO"));
+  Logger.log("TWILIO_FROM: " + (TWILIO_FROM || "NO"));
+  Logger.log("To: whatsapp:" + WA_RELAY_NUMBER);
+
+  if (!TWILIO_SID || !TWILIO_AUTH || !TWILIO_FROM) {
+    Logger.log("ABORT: one or more script properties are missing. Set them in Project Settings → Script Properties.");
+    return;
+  }
+
+  var resp = UrlFetchApp.fetch(
+    "https://api.twilio.com/2010-04-01/Accounts/" + TWILIO_SID + "/Messages.json",
+    {
+      method: "post",
+      headers: { Authorization: "Basic " + Utilities.base64Encode(TWILIO_SID + ":" + TWILIO_AUTH) },
+      payload: { From: TWILIO_FROM, To: "whatsapp:" + WA_RELAY_NUMBER, Body: "SAT test ✅ " + _istStamp() },
+      muteHttpExceptions: true,
+    }
+  );
+  Logger.log("HTTP status: " + resp.getResponseCode());
+  Logger.log("Response: " + resp.getContentText());
+}
+
 function _buildPartnerDailyReport(dateYmd) {
   var lines = ["📊 Daily report · " + dateYmd];
 
