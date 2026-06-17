@@ -352,7 +352,14 @@ export function PartnerReceivables() {
                         <p className="mt-0.5 text-[14px] text-[var(--color-text-secondary)] tabular-nums">
                           Inv {fmtDate(r.invoiceDate)}   ·   Due {fmtDate(r.dueDate)}
                         </p>
-                        <div className="mt-1.5 flex justify-end">
+                        <div className="mt-1.5 flex items-baseline justify-between gap-2">
+                          {kind === "partial" && (r.receipts || 0) > 0 ? (
+                            <span className="text-[14px] text-[var(--color-status-green)] tabular-nums">
+                              Paid {fmtRupees(r.receipts)} so far
+                            </span>
+                          ) : (
+                            <span />
+                          )}
                           <span className="text-[18px] font-bold tabular-nums text-[var(--color-text-primary)]">
                             {fmtRupees(r.invoiceAmount)}
                           </span>
