@@ -451,6 +451,70 @@ function _buildSummary(title, rows) {
   return lines.join("\n");
 }
 
+/* ------------------------------ partner daily digest ------------------------------ */
+// Install once via the Apps Script editor: run installDailyReportTrigger().
+// Sends one WhatsApp message at 11:00 IST summarising YESTERDAY's master
+// production (same figures as the partner Day tab) plus that day's cash-in.
+
+function sendDailyPartnerReport() {
+  if (!WA_ENABLED) return;
+  var d = new Date(); d.setDate(d.getDate() - 1);
+  var dateY = _ymd(d);
+  _waSend(_buildPartnerDailyReport(dateY));
+}
+
+function _buildPartnerDailyReport(dateYmd) {
+  var lines = ["📊 Daily report · " + dateYmd];
+
+  var rows = _readMasterDay(dateYmd);
+  if (!rows.length) {
+    lines.push("Production: no entries.");
+  } else {
+    var meters = 0, revenue = 0, target = 0;
+    var looms = {};
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      meters += r.meters;
+      revenue += r.revenue;
+      target += r.targetMeters;
+      if (r.meters > 0 || r.efficiency > 0) looms[r.loom] = true;
+    }
+    var loomCount = 0; for (var k in looms) loomCount++;
+    var eff = target > 0 ? Math.round((meters / target) * 100) : 0;
+    lines.push(loomCount + (loomCount === 1 ? " loom" : " looms") + " · " + Math.round(meters) + " mtr");
+    lines.push("Revenue " + _inr(revenue) + " · Avg " + eff + "%");
+  }
+
+  var cashIn = _readCashLedger(dateYmd, dateYmd, "", "in");
+  if (cashIn.length) {
+    var total = 0;
+    for (var j = 0; j < cashIn.length; j++) total += cashIn[j].amount;
+    lines.push("");
+    lines.push("💰 Cash in " + _inr(total));
+    for (var m = 0; m < cashIn.length; m++) {
+      var c = cashIn[m];
+      lines.push("• " + (c.description || "—") + " " + _inr(c.amount));
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function installDailyReportTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === "sendDailyPartnerReport") {
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  }
+  ScriptApp.newTrigger("sendDailyPartnerReport")
+    .timeBased()
+    .atHour(11)
+    .everyDays(1)
+    .inTimezone("Asia/Kolkata")
+    .create();
+}
+
 /* ------------------------------ master workbook (Partner) ------------------------------ */
 /**
  * Master tab `Looms_Production` columns:
@@ -1038,6 +1102,19 @@ function _ymd(d) {
   return d.getFullYear() + "-" + (m < 10 ? "0" + m : m) + "-" + (day < 10 ? "0" + day : day);
 }
 function _daysAgo(n) { var d = new Date(); d.setDate(d.getDate() - n); d.setHours(0,0,0,0); return d; }
+function _inr(n) {
+  n = Math.round(Number(n) || 0);
+  var sign = n < 0 ? "-" : "";
+  n = Math.abs(n);
+  var s = String(n);
+  var last3 = s.length > 3 ? s.slice(-3) : s;
+  var rest = s.length > 3 ? s.slice(0, -3) : "";
+  if (rest) {
+    rest = rest.replace(/\B(?=(\d{2})+(?!\d))/g, ",");
+    last3 = "," + last3;
+  }
+  return sign + "₹" + rest + last3;
+}
 function _istStamp(iso) {
   var d = iso ? _toDate(iso) : new Date();
   if (!d) d = new Date();
