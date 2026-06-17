@@ -98,6 +98,9 @@ var CF_LEDGER_CAT_COL   = 4;      // D  Cash flow category
 // Leave WA_ENABLED=false until Twilio creds are added; messages are no-ops.
 var WA_ENABLED = true;
 var WA_RELAY_NUMBER = "+919940111315";
+
+// Partner PWA — used as the tappable nudge link in the daily digest.
+var APP_URL = "https://autoloom-daily-status.vercel.app/";
 var TWILIO_SID = PropertiesService.getScriptProperties().getProperty("TWILIO_SID") || "";
 var TWILIO_AUTH = PropertiesService.getScriptProperties().getProperty("TWILIO_AUTH") || "";
 var TWILIO_FROM = PropertiesService.getScriptProperties().getProperty("TWILIO_FROM") || ""; // e.g. whatsapp:+14155238886
@@ -475,7 +478,9 @@ function _buildPartnerDailyReport(dateYmd) {
 
   var rows = _readMasterDay(dateYmd);
   if (!rows.length) {
-    lines.push("Production: no entries.");
+    // Mirror the Day tab empty state: production for this day is not yet fed.
+    lines.push("⏳ Production not yet entered");
+    lines.push("சூப்பர்வைசர் இன்னும் பதிவு செய்யவில்லை.");
   } else {
     var meters = 0, revenue = 0, target = 0;
     var looms = {};
@@ -514,6 +519,10 @@ function _buildPartnerDailyReport(dateYmd) {
   var pending = _totalPendingReceivables();
   lines.push("");
   lines.push("📥 Pending receivables " + _inr(pending));
+
+  // Always nudge to the app — WhatsApp makes the raw URL tappable.
+  lines.push("");
+  lines.push("👉 View full report: " + APP_URL);
 
   return lines.join("\n");
 }
