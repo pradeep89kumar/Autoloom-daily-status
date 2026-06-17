@@ -96,7 +96,7 @@ var CF_LEDGER_CAT_COL   = 4;      // D  Cash flow category
 
 // WhatsApp manual relay — single number that forwards to the partner group.
 // Leave WA_ENABLED=false until Twilio creds are added; messages are no-ops.
-var WA_ENABLED = false;
+var WA_ENABLED = true;
 var WA_RELAY_NUMBER = "+919940111315";
 var TWILIO_SID = PropertiesService.getScriptProperties().getProperty("TWILIO_SID") || "";
 var TWILIO_AUTH = PropertiesService.getScriptProperties().getProperty("TWILIO_AUTH") || "";
@@ -461,6 +461,13 @@ function sendDailyPartnerReport() {
   var d = new Date(); d.setDate(d.getDate() - 1);
   var dateY = _ymd(d);
   _waSend(_buildPartnerDailyReport(dateY));
+}
+
+// Run manually from the Apps Script editor to verify Twilio delivery now,
+// without waiting for the 11:00 trigger. Sends yesterday's digest immediately.
+function testDailyPartnerReport() {
+  var d = new Date(); d.setDate(d.getDate() - 1);
+  _waSend(_buildPartnerDailyReport(_ymd(d)));
 }
 
 function _buildPartnerDailyReport(dateYmd) {
