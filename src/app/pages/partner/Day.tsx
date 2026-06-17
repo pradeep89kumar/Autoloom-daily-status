@@ -11,6 +11,7 @@ import {
   fmtPercent,
   dayBrief,
   shortDateLong,
+  shortOrderTag,
   efficiencyBand,
   endStateMeta,
   type LoomDayTotal,
@@ -269,7 +270,7 @@ function LoomRow({
         .filter((t) => t.length > 0),
     ),
   );
-  const orderLine = tags.join(" · ");
+  const orderLine = tags.map(shortOrderTag).join("  /  ");
 
   return (
     <li>

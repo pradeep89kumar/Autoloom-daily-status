@@ -64,6 +64,26 @@ export function shortDateLong(d: Date): string {
 }
 
 /**
+ * Shorten an order tag ("Customer Name - 16/1") for the collapsed Day row.
+ * Splits on the FIRST hyphen, truncates the customer part, and always keeps
+ * the design number after the hyphen. Tags without a hyphen are shown as-is.
+ */
+export function shortOrderTag(tag: string): string {
+  const t = tag.trim();
+  if (!t) return "";
+  const i = t.indexOf("-");
+  if (i === -1) return t;
+  const customer = t.slice(0, i).trim();
+  const design = t.slice(i + 1).trim();
+  const MAX = 14;
+  const shortCust =
+    customer.length > MAX ? customer.slice(0, MAX).trimEnd() + "…" : customer;
+  if (!design) return shortCust;
+  if (!shortCust) return design;
+  return `${shortCust} · ${design}`;
+}
+
+/**
  * One calm Tamil sentence summarizing the day for the partner snapshot.
  * Keeps numerals in Arabic digits for fast reading; tone is factual, no exclamations.
  */

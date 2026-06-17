@@ -215,7 +215,7 @@ function _visitsSheet() {
 function _logVisit(p) {
   var sh = _visitsSheet();
   sh.appendRow([
-    p.capturedAt || new Date().toISOString(), // A
+    _istStamp(p.capturedAt),                   // A
     p.country   || "",                        // B
     p.region    || "",                        // C
     p.city      || "",                        // D
@@ -242,7 +242,7 @@ function _appendProduction(p) {
     Number(p.warpCuts) || 0,           // J
     p.loomState || "",                 // K
     p.note || "",                      // L
-    p.capturedAt || new Date().toISOString(), // M
+    _istStamp(p.capturedAt),           // M
     p.weaver || "",                    // N
     Number(p.efficiencyPct) || 0,      // O
     p.runtimeMinutes != null ? Number(p.runtimeMinutes) : "", // P
@@ -274,14 +274,14 @@ function _editProduction(p) {
   sh.getRange(rowIndex, 14, 1, 1).setValue(p.weaver || row[13]);
   sh.getRange(rowIndex, 15, 1, 1).setValue(Number(p.efficiencyPct) || 0);
   sh.getRange(rowIndex, 16, 1, 1).setValue(p.runtimeMinutes != null ? Number(p.runtimeMinutes) : "");
-  sh.getRange(rowIndex, 17, 1, 1).setValue(new Date().toISOString()); // Q Edited at
+  sh.getRange(rowIndex, 17, 1, 1).setValue(_istStamp()); // Q Edited at
   return _json({ ok: true });
 }
 
 function _logLoading(p) {
   var sh = _loadingsSheet();
   sh.appendRow([
-    p.capturedAt || new Date().toISOString(),  // A
+    _istStamp(p.capturedAt),                   // A
     (p.loomId || "").toUpperCase(),            // B
     p.designName || "",                        // C
     p.customerName || "",                      // D
@@ -1037,3 +1037,8 @@ function _ymd(d) {
   return d.getFullYear() + "-" + (m < 10 ? "0" + m : m) + "-" + (day < 10 ? "0" + day : day);
 }
 function _daysAgo(n) { var d = new Date(); d.setDate(d.getDate() - n); d.setHours(0,0,0,0); return d; }
+function _istStamp(iso) {
+  var d = iso ? _toDate(iso) : new Date();
+  if (!d) d = new Date();
+  return Utilities.formatDate(d, "Asia/Kolkata", "yyyy-MM-dd HH:mm:ss");
+}
