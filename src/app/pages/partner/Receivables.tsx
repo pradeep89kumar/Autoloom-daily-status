@@ -354,7 +354,7 @@ export function PartnerReceivables() {
                         </p>
                         <div className="mt-1.5 flex items-baseline justify-between gap-2">
                           {kind === "partial" && (r.receipts || 0) > 0 ? (
-                            <span className="text-[14px] text-[var(--color-status-green)] tabular-nums">
+                            <span className="text-[14px] font-bold text-[var(--color-status-green)] tabular-nums">
                               Paid {fmtRupees(r.receipts)} so far
                             </span>
                           ) : (

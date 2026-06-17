@@ -753,7 +753,8 @@ function _readCashLedger(fromYmd, toYmd, accountKey, direction) {
 
   // Each account contributes one or two columns in the row.
   // Inflow/outflow are kept as separate sources so we can sign them correctly.
-  // For CC, withdrawals (M) bring cash into operations → IN; repayment (N) and interest (O) are OUT.
+  // For CC: drawing from the CC to pay an expense (M) is cash OUT; a credit into
+  // the CC — e.g. a bill collection that pays it down (N) — is cash IN; interest (O) is OUT.
   var SOURCES = [
     { key: "tmb",         col: CF_COL_TMB_CREDIT - 1,      sign:  1, kind: "credit" },
     { key: "tmb",         col: CF_COL_TMB_DEBIT - 1,       sign: -1, kind: "debit"  },
@@ -764,7 +765,7 @@ function _readCashLedger(fromYmd, toYmd, accountKey, direction) {
     { key: "cash",        col: CF_COL_CASH_CREDIT - 1,     sign:  1, kind: "credit" },
     { key: "cash",        col: CF_COL_CASH_DEBIT - 1,      sign: -1, kind: "debit"  },
     { key: "iobCc",       col: CF_COL_IOB_CC_DRAWN - 1,    sign: -1, kind: "spend" },
-    { key: "iobCc",       col: CF_COL_IOB_CC_REPAY - 1,    sign: -1, kind: "repay"  },
+    { key: "iobCc",       col: CF_COL_IOB_CC_REPAY - 1,    sign:  1, kind: "credit"  },
     { key: "iobCc",       col: CF_COL_IOB_CC_INTEREST - 1, sign: -1, kind: "interest" }
   ];
 
