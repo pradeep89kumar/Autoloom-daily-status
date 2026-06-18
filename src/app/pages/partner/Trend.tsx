@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { TrendUp, TrendDown, ArrowRight, CaretDown } from "@phosphor-icons/react";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
 import { fetchMasterRange, type MasterRangeRow } from "../../lib/sheetSync";
 import { LOOM_CATALOG, isNewLoom } from "../../lib/looms";
 import { NewPill } from "../../components/NewPill";
@@ -17,7 +26,7 @@ import {
   fmtSignedPp,
 } from "../../lib/partnerCopy";
 
-type Metric = "efficiency" | "meters" | "revenue";
+type Metric = "efficiency" | "revenue";
 
 const DAYS = 14;
 const LOOMS = LOOM_CATALOG.map((l) => l.name);
@@ -83,11 +92,9 @@ function buildGrid(rows: MasterRangeRow[]): Map<string, Cell> {
 
 function metricValue(c: Cell | undefined, m: Metric): number | null {
   if (!c || c.meters === 0) {
-    if (m === "meters") return c?.meters ?? null;
     if (m === "revenue") return c?.revenue ?? null;
     return null;
   }
-  if (m === "meters") return c.meters;
   if (m === "revenue") return c.revenue;
   return c.target > 0 ? c.meters / c.target : null;
 }
@@ -341,11 +348,19 @@ export function PartnerTrend() {
       )}
 
       {/* Metric toggle */}
-      <div className="grid grid-cols-3 gap-1 p-1 bg-black/[0.04] rounded-lg mb-5 text-[14px]">
+      <div className="grid grid-cols-2 gap-1 p-1 bg-black/[0.04] rounded-lg mb-5 text-[14px]">
         <SegBtn active={metric === "efficiency"} onClick={() => setMetric("efficiency")} label="Performance" />
-        <SegBtn active={metric === "meters"} onClick={() => setMetric("meters")} label="mtr" />
         <SegBtn active={metric === "revenue"} onClick={() => setMetric("revenue")} label="வருமானம்" />
       </div>
+
+      {/* Income trend line — revenue view only */}
+      {metric === "revenue" ? (
+        loading || !rows ? (
+          <div className="h-64 bg-black/[0.04] rounded-xl animate-pulse mb-6" />
+        ) : (
+          <IncomeLineSection rows={rows} dates={dates} />
+        )
+      ) : null}
 
       {/* Heatmap */}
       <div className="mb-6">
@@ -384,9 +399,7 @@ export function PartnerTrend() {
                           ? "தரவு இல்லை"
                           : metric === "efficiency"
                             ? fmtPercent(v)
-                            : metric === "meters"
-                              ? fmtMeters(v)
-                              : fmtRupees(v)
+                            : fmtRupees(v)
                       }`;
                       return (
                         <td
@@ -496,7 +509,6 @@ export function PartnerTrend() {
                 if (c && c.meters > 0) activeDays++;
               }
               const avgRevenue = activeDays > 0 ? (t?.revenue ?? 0) / activeDays : 0;
-              const avgMeters = activeDays > 0 ? (t?.meters ?? 0) / activeDays : 0;
               return (
                 <li key={loom} className="py-3 flex items-center gap-3">
                   <span className="w-12 inline-flex items-baseline gap-1 text-[16px] font-bold tabular-nums">
@@ -514,19 +526,10 @@ export function PartnerTrend() {
                       <span className="text-[18px] font-bold tabular-nums text-[var(--color-text-primary)]">
                         {fmtPercent(eff)}
                       </span>
-                    ) : metric === "revenue" ? (
-                      <>
-                        <span className="block text-[18px] font-bold tabular-nums text-[var(--color-text-primary)] leading-tight">
-                          {fmtRupees(avgRevenue)}
-                        </span>
-                        <span className="block text-[11px] text-[var(--color-text-secondary)]">
-                          / நாள் ({activeDays}d)
-                        </span>
-                      </>
                     ) : (
                       <>
                         <span className="block text-[18px] font-bold tabular-nums text-[var(--color-text-primary)] leading-tight">
-                          {fmtMeters(avgMeters)}
+                          {fmtRupees(avgRevenue)}
                         </span>
                         <span className="block text-[11px] text-[var(--color-text-secondary)]">
                           / நாள் ({activeDays}d)
@@ -888,5 +891,208 @@ function PlanBar({ plan }: { plan: PlanShape }) {
       </span>
       <span className={`text-[11px] tabular-nums font-semibold ${cls.text}`}>{Math.round(plan.pct * 100)}%</span>
     </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Income trend line (Option A) — one bold line = summed income across the
+// selected looms per day, against an active-aware ₹3,500/loom target line.
+// ---------------------------------------------------------------------------
+
+interface IncomePoint {
+  date: string;
+  label: string;
+  income: number;
+  target: number;
+  partial: boolean;
+}
+
+function IncomeLineSection({ rows, dates }: { rows: MasterRangeRow[]; dates: Date[] }) {
+  const [range, setRange] = useState<7 | 14>(14);
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(LOOMS));
+
+  const shownDates = useMemo(
+    () => (range === 7 ? dates.slice(-7) : dates),
+    [dates, range],
+  );
+
+  const data = useMemo<IncomePoint[]>(() => {
+    // Sum revenue per date|loom, but only for the looms the partner has on.
+    const rev = new Map<string, number>();
+    for (const r of rows) {
+      if (!selected.has(r.loom)) continue;
+      const k = `${r.date}|${r.loom}`;
+      rev.set(k, (rev.get(k) || 0) + r.revenue);
+    }
+    const lastIdx = shownDates.length - 1;
+    return shownDates.map((d, i) => {
+      const ds = ymd(d);
+      let income = 0;
+      let expected = 0; // selected looms that were physically running that day
+      for (const loom of selected) {
+        income += rev.get(`${ds}|${loom}`) || 0;
+        const phantom = isNewLoom(loom) && ds < NEW_LOOM_START;
+        if (!phantom) expected++;
+      }
+      return {
+        date: ds,
+        label: String(d.getDate()),
+        income,
+        target: expected * PER_LOOM_DAY_TARGET,
+        partial: i === lastIdx,
+      };
+    });
+  }, [rows, shownDates, selected]);
+
+  const total = useMemo(() => data.reduce((s, p) => s + p.income, 0), [data]);
+  const allOn = selected.size === LOOMS.length;
+
+  const toggle = (loom: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(loom)) {
+        if (next.size === 1) return prev; // keep at least one loom on
+        next.delete(loom);
+      } else {
+        next.add(loom);
+      }
+      return next;
+    });
+
+  return (
+    <div className="rounded-xl bg-white border border-[var(--color-border-hairline)] px-3 pt-3 pb-2 mb-6">
+      {/* Header — window total + range toggle */}
+      <div className="flex items-center justify-between mb-2 px-1">
+        <div>
+          <div className="text-[13px] font-semibold text-[var(--color-text-primary)]">வருமானம் / நாள்</div>
+          <div className="text-[12px] text-[var(--color-text-secondary)] tabular-nums">
+            மொத்தம் {fmtRupees(total)} · {range} நாட்கள்
+          </div>
+        </div>
+        <div className="inline-flex rounded-md bg-black/[0.04] p-0.5 text-[12px] font-medium">
+          {[7, 14].map((n) => (
+            <button
+              key={n}
+              onClick={() => setRange(n as 7 | 14)}
+              className={`px-2.5 py-1 rounded transition-colors ${
+                range === n
+                  ? "bg-white text-[var(--color-text-primary)] shadow-sm"
+                  : "text-[var(--color-text-secondary)]"
+              }`}
+            >
+              {n}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Line chart */}
+      <div className="h-44 w-full">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={data} margin={{ top: 8, right: 10, left: -10, bottom: 0 }}>
+            <CartesianGrid stroke="var(--color-border-hairline)" vertical={false} />
+            <XAxis
+              dataKey="label"
+              tick={{ fontSize: 11, fill: "var(--color-text-secondary)" }}
+              axisLine={false}
+              tickLine={false}
+              interval="preserveStartEnd"
+            />
+            <YAxis
+              tickFormatter={(v: number) => fmtThousand(v)}
+              tick={{ fontSize: 10, fill: "var(--color-text-secondary)" }}
+              axisLine={false}
+              tickLine={false}
+              width={42}
+            />
+            <Tooltip content={<IncomeTooltip />} cursor={{ stroke: "var(--color-border-hairline)" }} />
+            {/* Active-aware target — dashed hairline */}
+            <Line
+              type="monotone"
+              dataKey="target"
+              stroke="var(--color-text-secondary)"
+              strokeWidth={1.5}
+              strokeDasharray="4 4"
+              dot={false}
+              isAnimationActive={false}
+            />
+            {/* Actual summed income — bold green */}
+            <Line
+              type="monotone"
+              dataKey="income"
+              stroke="var(--color-status-green)"
+              strokeWidth={2.5}
+              dot={<IncomeDot />}
+              activeDot={{ r: 4 }}
+              isAnimationActive={false}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* Loom filter */}
+      <div className="flex gap-1.5 overflow-x-auto -mx-3 px-3 pt-2 pb-1">
+        <FilterChip label="All" active={allOn} onClick={() => setSelected(new Set(LOOMS))} />
+        {LOOMS.map((loom) => (
+          <FilterChip
+            key={loom}
+            label={loom}
+            active={selected.has(loom)}
+            onClick={() => toggle(loom)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Only the last (partial / in-progress) day gets a hollow, dimmed marker so it
+// reads as "not a full day yet". All other points stay on the clean line.
+function IncomeDot(props: { cx?: number; cy?: number; payload?: IncomePoint }) {
+  const { cx, cy, payload } = props;
+  if (cx == null || cy == null || !payload || !payload.partial) return null;
+  return (
+    <circle
+      cx={cx}
+      cy={cy}
+      r={3.5}
+      fill="white"
+      stroke="var(--color-status-green)"
+      strokeWidth={1.5}
+      opacity={0.55}
+    />
+  );
+}
+
+function IncomeTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: Array<{ payload: IncomePoint }>;
+}) {
+  if (!active || !payload || payload.length === 0) return null;
+  const p = payload[0].payload;
+  return (
+    <div className="rounded-md bg-[var(--color-text-primary)] text-white px-2.5 py-1.5 text-[12px] shadow-lg">
+      <div className="font-semibold tabular-nums">{fmtRupees(p.income)}</div>
+      <div className="opacity-70 tabular-nums">இலக்கு {fmtRupees(p.target)}</div>
+      {p.partial ? <div className="opacity-60 mt-0.5">இன்று · பகுதி தரவு</div> : null}
+    </div>
+  );
+}
+
+function FilterChip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`shrink-0 px-2.5 py-1 rounded-full text-[12px] font-semibold tabular-nums border transition-colors ${
+        active
+          ? "bg-[var(--color-status-green)]/15 text-[var(--color-status-green)] border-[var(--color-status-green)]/30"
+          : "bg-transparent text-[var(--color-text-secondary)] border-[var(--color-border-hairline)]"
+      }`}
+    >
+      {label}
+    </button>
   );
 }
