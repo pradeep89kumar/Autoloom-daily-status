@@ -905,6 +905,64 @@ interface IncomePoint {
   partial: boolean;
 }
 
+// Wide row for the by-loom view: one numeric key per loom (null on days the
+// loom did not yet exist) + the shared per-loom target.
+interface ByLoomPoint {
+  date: string;
+  label: string;
+  partial: boolean;
+  target: number;
+  [loom: string]: number | string | boolean | null;
+}
+
+// Distinct, stable colour per loom (by catalogue index) for the by-loom lines.
+const LOOM_COLORS = [
+  "#2563eb", "#db2777", "#0891b2", "#7c3aed", "#ea580c", "#0d9488", "#9333ea",
+  "#0284c7", "#e11d48", "#4f46e5", "#65a30d", "#b45309", "#be123c", "#c026d3",
+];
+
+function loomColor(loom: string): string {
+  const i = LOOMS.indexOf(loom);
+  return LOOM_COLORS[(i >= 0 ? i : 0) % LOOM_COLORS.length];
+}
+
+const PER_LOOM_TARGET_ROUND = Math.round(PER_LOOM_CHART_TARGET);
+
+// Default by-loom selection: the two lowest + two highest earners over the
+// window (avg income across each loom's active days), so the breakdown opens
+// pre-focused on the laggards and the leaders for contrast. Looms with no data
+// in the window are not eligible; if fewer than four qualify, take what exists.
+function deriveDefaultLooms(rows: MasterRangeRow[], dates: Date[]): Set<string> {
+  const dateSet = new Set(dates.map((d) => ymd(d)));
+  const revByLoom = new Map<string, number>();
+  const daysByLoom = new Map<string, Set<string>>();
+  for (const r of rows) {
+    if (!dateSet.has(r.date)) continue;
+    if (r.revenue > 0) {
+      revByLoom.set(r.loom, (revByLoom.get(r.loom) || 0) + r.revenue);
+      let s = daysByLoom.get(r.loom);
+      if (!s) {
+        s = new Set();
+        daysByLoom.set(r.loom, s);
+      }
+      s.add(r.date);
+    }
+  }
+  const ranked = LOOMS.map((loom) => {
+    const days = daysByLoom.get(loom)?.size || 0;
+    return { loom, days, avg: days > 0 ? (revByLoom.get(loom) || 0) / days : 0 };
+  })
+    .filter((x) => x.days > 0)
+    .sort((a, b) => a.avg - b.avg);
+  if (ranked.length <= 4) return new Set(ranked.map((x) => x.loom));
+  return new Set([
+    ranked[0].loom,
+    ranked[1].loom,
+    ranked[ranked.length - 2].loom,
+    ranked[ranked.length - 1].loom,
+  ]);
+}
+
 function IncomeLineSection({
   rows,
   mtdRows,
@@ -916,8 +974,10 @@ function IncomeLineSection({
   dates: Date[];
   monthStart: Date;
 }) {
+  const [view, setView] = useState<"overall" | "byLoom">("overall");
   const [mode, setMode] = useState<"month" | "7d">("month");
-  const [selected, setSelected] = useState<Set<string>>(() => new Set(LOOMS));
+  // null = follow the auto-derived default; a concrete Set = user override.
+  const [selected, setSelected] = useState<Set<string> | null>(null);
 
   // Month-to-date calendar days (1st → today), for the "this month" option.
   const monthDates = useMemo(() => {
@@ -938,11 +998,17 @@ function IncomeLineSection({
   const shownDates = mode === "7d" ? dates.slice(-7) : monthDates;
   const sourceRows = mode === "7d" ? rows : mtdRows || [];
 
-  const data = useMemo<IncomePoint[]>(() => {
-    // Sum revenue per date|loom, but only for the looms the partner has on.
+  // Auto default tracks the data/range until the partner picks looms manually.
+  const autoDefault = useMemo(
+    () => deriveDefaultLooms(sourceRows, shownDates),
+    [sourceRows, shownDates],
+  );
+  const effSelected = selected ?? autoDefault;
+
+  // Overall view — one summed line across the whole fleet (selection-agnostic).
+  const overallData = useMemo<IncomePoint[]>(() => {
     const rev = new Map<string, number>();
     for (const r of sourceRows) {
-      if (!selected.has(r.loom)) continue;
       const k = `${r.date}|${r.loom}`;
       rev.set(k, (rev.get(k) || 0) + r.revenue);
     }
@@ -950,8 +1016,8 @@ function IncomeLineSection({
     return shownDates.map((d, i) => {
       const ds = ymd(d);
       let income = 0;
-      let expected = 0; // selected looms that were physically running that day
-      for (const loom of selected) {
+      let expected = 0; // looms physically running that day
+      for (const loom of LOOMS) {
         income += rev.get(`${ds}|${loom}`) || 0;
         const phantom = isNewLoom(loom) && ds < NEW_LOOM_START;
         if (!phantom) expected++;
@@ -964,33 +1030,84 @@ function IncomeLineSection({
         partial: i === lastIdx,
       };
     });
-  }, [sourceRows, shownDates, selected]);
+  }, [sourceRows, shownDates]);
 
-  const total = useMemo(() => data.reduce((s, p) => s + p.income, 0), [data]);
-  const allOn = selected.size === LOOMS.length;
-  // Full-fleet daily target for the current selection (legend readout).
-  const fleetTarget = Math.round(selected.size * PER_LOOM_CHART_TARGET);
-
-  const toggle = (loom: string) =>
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(loom)) {
-        if (next.size === 1) return prev; // keep at least one loom on
-        next.delete(loom);
-      } else {
-        next.add(loom);
+  // By-loom view — a wide row per day carrying every loom's income.
+  const byLoomData = useMemo<ByLoomPoint[]>(() => {
+    const rev = new Map<string, number>();
+    for (const r of sourceRows) {
+      const k = `${r.date}|${r.loom}`;
+      rev.set(k, (rev.get(k) || 0) + r.revenue);
+    }
+    const lastIdx = shownDates.length - 1;
+    return shownDates.map((d, i) => {
+      const ds = ymd(d);
+      const point: ByLoomPoint = {
+        date: ds,
+        label: String(d.getDate()),
+        partial: i === lastIdx,
+        target: PER_LOOM_TARGET_ROUND,
+      };
+      for (const loom of LOOMS) {
+        const phantom = isNewLoom(loom) && ds < NEW_LOOM_START;
+        point[loom] = phantom ? null : rev.get(`${ds}|${loom}`) || 0;
       }
-      return next;
+      return point;
     });
+  }, [sourceRows, shownDates]);
+
+  const total = useMemo(() => overallData.reduce((s, p) => s + p.income, 0), [overallData]);
+  const allOn = effSelected.size === LOOMS.length;
+  // Full-fleet daily target (legend readout for the overall view).
+  const fleetTarget = Math.round(LOOMS.length * PER_LOOM_CHART_TARGET);
+
+  // Draw unselected (grey) looms first, selected (coloured) on top.
+  const loomOrder = useMemo(
+    () => [...LOOMS].sort((a, b) => (effSelected.has(a) ? 1 : 0) - (effSelected.has(b) ? 1 : 0)),
+    [effSelected],
+  );
+
+  const toggle = (loom: string) => {
+    const base = new Set(selected ?? autoDefault);
+    if (base.has(loom)) {
+      if (base.size === 1) return; // keep at least one loom highlighted
+      base.delete(loom);
+    } else {
+      base.add(loom);
+    }
+    setSelected(base);
+  };
 
   return (
     <div className="rounded-xl bg-white border border-[var(--color-border-hairline)] px-3 pt-3 pb-2 mb-6">
-      {/* Header — window total + range toggle */}
+      {/* View switch — overall fleet vs per-loom breakdown */}
+      <div className="inline-flex rounded-md bg-black/[0.04] p-0.5 text-[12px] font-medium mb-2">
+        {([
+          { key: "overall", label: "மொத்தம்" },
+          { key: "byLoom", label: "தறி வாரியாக" },
+        ] as const).map((opt) => (
+          <button
+            key={opt.key}
+            onClick={() => setView(opt.key)}
+            className={`px-2.5 py-1 rounded transition-colors ${
+              view === opt.key
+                ? "bg-white text-[var(--color-text-primary)] shadow-sm"
+                : "text-[var(--color-text-secondary)]"
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Header — window readout + range toggle */}
       <div className="flex items-center justify-between mb-2 px-1">
         <div>
           <div className="text-[13px] font-semibold text-[var(--color-text-primary)]">வருமானம் / நாள்</div>
           <div className="text-[12px] text-[var(--color-text-secondary)] tabular-nums">
-            மொத்தம் {fmtRupees(total)} · {shownDates.length} நாட்கள்
+            {view === "overall"
+              ? `மொத்தம் ${fmtRupees(total)} · ${shownDates.length} நாட்கள்`
+              : `${effSelected.size} தறி · ${shownDates.length} நாட்கள்`}
           </div>
         </div>
         <div className="inline-flex rounded-md bg-black/[0.04] p-0.5 text-[12px] font-medium">
@@ -1016,7 +1133,10 @@ function IncomeLineSection({
       {/* Line chart */}
       <div className="h-44 w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={data} margin={{ top: 8, right: 10, left: -10, bottom: 0 }}>
+          <LineChart
+            data={view === "overall" ? overallData : byLoomData}
+            margin={{ top: 8, right: 10, left: -10, bottom: 0 }}
+          >
             <CartesianGrid stroke="var(--color-border-hairline)" vertical={false} />
             <XAxis
               dataKey="label"
@@ -1032,8 +1152,11 @@ function IncomeLineSection({
               tickLine={false}
               width={42}
             />
-            <Tooltip content={<IncomeTooltip />} cursor={{ stroke: "var(--color-border-hairline)" }} />
-            {/* Active-aware target — dashed hairline */}
+            <Tooltip
+              content={view === "overall" ? <IncomeTooltip /> : <ByLoomTooltip selected={effSelected} />}
+              cursor={{ stroke: "var(--color-border-hairline)" }}
+            />
+            {/* Target — dashed hairline (active-aware fleet, or flat per-loom) */}
             <Line
               type="monotone"
               dataKey="target"
@@ -1043,44 +1166,75 @@ function IncomeLineSection({
               dot={false}
               isAnimationActive={false}
             />
-            {/* Actual summed income — bold green */}
-            <Line
-              type="monotone"
-              dataKey="income"
-              stroke="var(--color-status-green)"
-              strokeWidth={2.5}
-              dot={<IncomeDot />}
-              activeDot={{ r: 4 }}
-              isAnimationActive={false}
-            />
+            {view === "overall" ? (
+              <Line
+                type="monotone"
+                dataKey="income"
+                stroke="var(--color-status-green)"
+                strokeWidth={2.5}
+                dot={<IncomeDot />}
+                activeDot={{ r: 4 }}
+                isAnimationActive={false}
+              />
+            ) : (
+              loomOrder.map((loom) => {
+                const on = effSelected.has(loom);
+                return (
+                  <Line
+                    key={loom}
+                    type="monotone"
+                    dataKey={loom}
+                    stroke={on ? loomColor(loom) : "var(--color-text-secondary)"}
+                    strokeWidth={on ? 2.5 : 1}
+                    strokeOpacity={on ? 1 : 0.18}
+                    dot={false}
+                    activeDot={on ? { r: 3 } : false}
+                    connectNulls={false}
+                    isAnimationActive={false}
+                  />
+                );
+              })
+            )}
           </LineChart>
         </ResponsiveContainer>
       </div>
 
       {/* Legend — what each line means */}
       <div className="flex items-center gap-4 mt-1 px-1 text-[12px] text-[var(--color-text-secondary)]">
-        <span className="inline-flex items-center gap-1.5">
-          <span className="inline-block w-4 h-[2.5px] rounded-full bg-[var(--color-status-green)]" />
-          வருமானம்
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <span className="inline-block w-4 border-t-[1.5px] border-dashed border-[var(--color-text-secondary)]" />
-          இலக்கு · {fmtRupees(fleetTarget)}/நாள்
-        </span>
+        {view === "overall" ? (
+          <>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-block w-4 h-[2.5px] rounded-full bg-[var(--color-status-green)]" />
+              வருமானம்
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-block w-4 border-t-[1.5px] border-dashed border-[var(--color-text-secondary)]" />
+              இலக்கு · {fmtRupees(fleetTarget)}/நாள்
+            </span>
+          </>
+        ) : (
+          <span className="inline-flex items-center gap-1.5">
+            <span className="inline-block w-4 border-t-[1.5px] border-dashed border-[var(--color-text-secondary)]" />
+            ஒரு தறி இலக்கு · {fmtRupees(PER_LOOM_TARGET_ROUND)}/நாள்
+          </span>
+        )}
       </div>
 
-      {/* Loom filter */}
-      <div className="flex gap-1.5 overflow-x-auto -mx-3 px-3 pt-2 pb-1">
-        <FilterChip label="All" active={allOn} onClick={() => setSelected(new Set(LOOMS))} />
-        {LOOMS.map((loom) => (
-          <FilterChip
-            key={loom}
-            label={loom}
-            active={selected.has(loom)}
-            onClick={() => toggle(loom)}
-          />
-        ))}
-      </div>
+      {/* Loom filter — by-loom view only */}
+      {view === "byLoom" ? (
+        <div className="flex gap-1.5 overflow-x-auto -mx-3 px-3 pt-2 pb-1">
+          <FilterChip label="All" active={allOn} onClick={() => setSelected(new Set(LOOMS))} />
+          {LOOMS.map((loom) => (
+            <FilterChip
+              key={loom}
+              label={loom}
+              active={effSelected.has(loom)}
+              color={loomColor(loom)}
+              onClick={() => toggle(loom)}
+            />
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1121,13 +1275,59 @@ function IncomeTooltip({
   );
 }
 
-function FilterChip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+function ByLoomTooltip({
+  active,
+  payload,
+  selected,
+}: {
+  active?: boolean;
+  payload?: Array<{ payload: ByLoomPoint }>;
+  selected?: Set<string>;
+}) {
+  if (!active || !payload || payload.length === 0 || !selected) return null;
+  const p = payload[0].payload;
+  const items = LOOMS.filter((l) => selected.has(l) && p[l] != null)
+    .map((l) => ({ loom: l, val: p[l] as number }))
+    .sort((a, b) => b.val - a.val);
+  if (items.length === 0) return null;
+  return (
+    <div className="rounded-md bg-[var(--color-text-primary)] text-white px-2.5 py-1.5 text-[12px] shadow-lg">
+      {items.map((it) => (
+        <div key={it.loom} className="flex items-center gap-1.5 tabular-nums">
+          <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: loomColor(it.loom) }} />
+          <span className="font-medium">{it.loom}</span>
+          <span className="ml-auto">{fmtRupees(it.val)}</span>
+        </div>
+      ))}
+      <div className="opacity-60 mt-1 pt-1 border-t border-white/20 tabular-nums">
+        இலக்கு {fmtRupees(PER_LOOM_TARGET_ROUND)}
+      </div>
+      {p.partial ? <div className="opacity-60 mt-0.5">இன்று · பகுதி தரவு</div> : null}
+    </div>
+  );
+}
+
+function FilterChip({
+  label,
+  active,
+  color,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  color?: string;
+  onClick: () => void;
+}) {
+  const activeStyle = active && color ? { color, borderColor: color, backgroundColor: `${color}26` } : undefined;
   return (
     <button
       onClick={onClick}
+      style={activeStyle}
       className={`shrink-0 px-2.5 py-1 rounded-full text-[12px] font-semibold tabular-nums border transition-colors ${
         active
-          ? "bg-[var(--color-status-green)]/15 text-[var(--color-status-green)] border-[var(--color-status-green)]/30"
+          ? color
+            ? ""
+            : "bg-[var(--color-status-green)]/15 text-[var(--color-status-green)] border-[var(--color-status-green)]/30"
           : "bg-transparent text-[var(--color-text-secondary)] border-[var(--color-border-hairline)]"
       }`}
     >
