@@ -107,7 +107,7 @@ var TWILIO_FROM = PropertiesService.getScriptProperties().getProperty("TWILIO_FR
 
 // CallMeBot — free WhatsApp relay (no Twilio account needed).
 // One-time setup on the RECEIVING phone:
-//   1. Save +34 644 51 95 23 as a contact.
+//   1. Save +34 684 770 005 as a contact.
 //   2. Send it the WhatsApp message: I allow callmebot to send me messages
 //   3. It replies with an API key. Store the values in Script Properties:
 //        CALLMEBOT_PHONE  → recipient number with country code, e.g. +919940111315
