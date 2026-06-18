@@ -105,6 +105,16 @@ var TWILIO_SID = PropertiesService.getScriptProperties().getProperty("TWILIO_SID
 var TWILIO_AUTH = PropertiesService.getScriptProperties().getProperty("TWILIO_AUTH") || "";
 var TWILIO_FROM = PropertiesService.getScriptProperties().getProperty("TWILIO_FROM") || ""; // e.g. whatsapp:+14155238886
 
+// Shared-secret API token (set in Project Settings → Script Properties as API_TOKEN).
+// Phase control:
+//   API_TOKEN unset            → endpoint stays fully open (legacy behaviour).
+//   API_TOKEN set + REQUIRED=false → migration mode: a wrong token is rejected,
+//                                    but a missing token is still allowed so the
+//                                    PWA keeps working until it ships the token.
+//   API_TOKEN set + REQUIRED=true  → enforced: every request must carry the token.
+var API_TOKEN = PropertiesService.getScriptProperties().getProperty("API_TOKEN") || "";
+var API_TOKEN_REQUIRED = false;
+
 // Ensure a phone number carries the whatsapp: channel prefix Twilio requires.
 // Accepts "+14155238886", "whatsapp:+14155238886", or "14155238886".
 function _waAddr(num) {
@@ -159,7 +169,28 @@ function _readOrders() {
   return out;
 }
 
+// Pull the token from a GET query param or a POST JSON body.
+function _extractToken(e) {
+  if (e && e.parameter && e.parameter.token) return String(e.parameter.token);
+  if (e && e.postData && e.postData.contents) {
+    try {
+      var b = JSON.parse(e.postData.contents);
+      if (b && b.token) return String(b.token);
+    } catch (err) { /* not JSON */ }
+  }
+  return "";
+}
+
+// Returns true when the request may proceed. See the API_TOKEN phase notes above.
+function _authOk(e) {
+  if (!API_TOKEN) return true;                 // no secret configured → open
+  var provided = _extractToken(e);
+  if (!provided) return !API_TOKEN_REQUIRED;   // missing token allowed only in migration mode
+  return provided === API_TOKEN;               // a supplied token must match exactly
+}
+
 function doGet(e) {
+  if (!_authOk(e)) return _json({ ok: false, error: "unauthorized" });
   var mode = (e && e.parameter && e.parameter.mode) || "";
   if (mode === "full")     return _json({ ok: true, rows: _readFullRows(21) });
   if (mode === "loadings") return _json({ ok: true, rows: _readLoadings(120) });
@@ -200,6 +231,7 @@ function doGet(e) {
 }
 
 function doPost(e) {
+  if (!_authOk(e)) return _json({ ok: false, error: "unauthorized" });
   if (!e || !e.postData) return _json({ ok: false, error: "no payload" });
   var p;
   try { p = JSON.parse(e.postData.contents); }
