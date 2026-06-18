@@ -286,6 +286,43 @@ function _logVisit(p) {
   return _json({ ok: true });
 }
 
+// Diagnostic — run this from the Apps Script editor, then open View → Logs (or
+// Executions). It answers "is the Visits tab still being written to?":
+//   • prints the token gate state (a closed gate silently rejects every POST),
+//   • reports the row count and WHEN the last visit was captured (so a stale
+//     last-entry date tells you logging stopped, and roughly when),
+//   • appends a clearly marked TEST row so a successful write is visible at the
+//     bottom of the tab immediately. Delete that TEST row afterwards.
+function diagnoseVisit() {
+  Logger.log("API_TOKEN set: " + (API_TOKEN ? "yes" : "NO"));
+  Logger.log("API_TOKEN_REQUIRED: " + API_TOKEN_REQUIRED);
+  if (API_TOKEN && API_TOKEN_REQUIRED) {
+    Logger.log("→ Token enforced: any POST without the matching token is rejected as 'unauthorized'.");
+    Logger.log("  Confirm Vercel env VITE_API_TOKEN equals this API_TOKEN, and that this web app was redeployed.");
+  }
+
+  var sh = _visitsSheet();
+  var last = sh.getLastRow();
+  Logger.log("Visits tab: \"" + VISITS_TAB + "\" · rows incl header: " + last);
+
+  if (last >= 2) {
+    var r = sh.getRange(last, 1, 1, 8).getValues()[0];
+    Logger.log("Last visit captured at: " + r[0]);
+    Logger.log("Last visit · path: " + r[6] + " · location: " + [r[3], r[2], r[1]].join(", "));
+    Logger.log("Last visit · UA: " + String(r[7]).slice(0, 60));
+  } else {
+    Logger.log("No visit rows yet (header only).");
+  }
+
+  // Append a marked test row so a successful write is visible in the sheet.
+  _logVisit({
+    capturedAt: new Date().toISOString(),
+    country: "TEST", region: "diagnoseVisit", city: "", latitude: "", longitude: "",
+    path: "/diagnostic", userAgent: "diagnoseVisit() manual run"
+  });
+  Logger.log("Appended a TEST row. Check the bottom of the \"" + VISITS_TAB + "\" tab; total rows now: " + sh.getLastRow());
+}
+
 function _appendProduction(p) {
   var sh = _sheet();
   sh.appendRow([
