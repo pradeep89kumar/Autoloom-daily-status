@@ -362,7 +362,8 @@ export function PartnerTrend() {
         )
       ) : null}
 
-      {/* Heatmap */}
+      {/* Day-by-day heatmap — Performance view only */}
+      {metric === "efficiency" ? (
       <div className="mb-6">
         <div className="text-[13px] font-semibold tracking-wide text-[var(--color-text-secondary)] mb-2">நாள் வாரியான பார்வை</div>
         {loading ? (
@@ -416,21 +417,13 @@ export function PartnerTrend() {
           </div>
         )}
         <div className="flex items-center gap-3 mt-3 text-[13px] text-[var(--color-text-secondary)]">
-          {metric === "efficiency" ? (
-            <>
-              <Legend tint="bg-[var(--color-status-red)]/15" label="<50%" />
-              <Legend tint="bg-[var(--color-status-amber)]/15" label="50–70" />
-              <Legend tint="bg-[var(--color-status-green)]/15" label="70–85" />
-              <Legend tint="bg-[var(--color-status-green)]/30" label="85+" />
-            </>
-          ) : (
-            <>
-              <Legend tint="bg-[var(--color-text-primary)]/[0.06]" label="குறைவு" />
-              <Legend tint="bg-[var(--color-text-primary)]/[0.36]" label="அதிகம்" />
-            </>
-          )}
+          <Legend tint="bg-[var(--color-status-red)]/15" label="<50%" />
+          <Legend tint="bg-[var(--color-status-amber)]/15" label="50–70" />
+          <Legend tint="bg-[var(--color-status-green)]/15" label="70–85" />
+          <Legend tint="bg-[var(--color-status-green)]/30" label="85+" />
         </div>
       </div>
+      ) : null}
 
       {/* Opportunity sentence */}
       {!loading && oppGap ? (
