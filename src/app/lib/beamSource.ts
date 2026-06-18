@@ -29,6 +29,14 @@ export interface BeamSource {
 }
 
 const ENDPOINT = import.meta.env.VITE_SHEET_WEBHOOK_URL as string | undefined;
+const API_TOKEN = (import.meta.env.VITE_API_TOKEN as string | undefined) || "";
+
+// Append the shared-secret token to a GET URL. No-op when no token is set.
+function withToken(url: string): string {
+  if (!API_TOKEN) return url;
+  const sep = url.indexOf("?") >= 0 ? "&" : "?";
+  return `${url}${sep}token=${encodeURIComponent(API_TOKEN)}`;
+}
 
 /* ----------------------------- sample data ----------------------------- */
 // Mirrors the four R.O STATUS tables as seen on the floor sheet, so the module
@@ -144,7 +152,7 @@ export class GoogleSheetBeamSource implements BeamSource {
   readonly isLive = true;
   async getBeamRegister(): Promise<BeamRegisterData> {
     if (!ENDPOINT) throw new Error("no endpoint");
-    const res = await fetch(`${ENDPOINT}?mode=beams`, { method: "GET" });
+    const res = await fetch(withToken(`${ENDPOINT}?mode=beams`), { method: "GET" });
     const data = await res.json();
     if (!data?.ok) throw new Error("beams endpoint not ready");
     // An endpoint that doesn't yet handle ?mode=beams falls through to the

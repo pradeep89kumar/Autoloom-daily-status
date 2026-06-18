@@ -54,6 +54,20 @@ export interface VisitPayload {
 export type SheetPayload = ProductionEntryPayload | LoadingPayload | VisitPayload;
 
 const ENDPOINT = import.meta.env.VITE_SHEET_WEBHOOK_URL as string | undefined;
+const API_TOKEN = (import.meta.env.VITE_API_TOKEN as string | undefined) || "";
+
+// Append the shared-secret token to a GET URL. No-op when no token is set, so
+// the app keeps working before the token is configured.
+function withToken(url: string): string {
+  if (!API_TOKEN) return url;
+  const sep = url.indexOf("?") >= 0 ? "&" : "?";
+  return `${url}${sep}token=${encodeURIComponent(API_TOKEN)}`;
+}
+
+// Merge the shared-secret token into a POST payload. No-op when no token is set.
+function withTokenBody<T extends object>(p: T): T & { token?: string } {
+  return API_TOKEN ? { ...p, token: API_TOKEN } : p;
+}
 
 export async function submitToSheet(p: SheetPayload): Promise<{ ok: boolean }> {
   if (!ENDPOINT) {
@@ -67,7 +81,7 @@ export async function submitToSheet(p: SheetPayload): Promise<{ ok: boolean }> {
       mode: "no-cors",
       keepalive: true,
       headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify(p),
+      body: JSON.stringify(withTokenBody(p)),
     });
     return { ok: true };
   } catch (e) {
@@ -111,7 +125,7 @@ export interface CapturedRow {
 export async function fetchRecentRows(): Promise<CapturedRow[]> {
   if (!ENDPOINT) return [];
   try {
-    const res = await fetch(ENDPOINT, { method: "GET" });
+    const res = await fetch(withToken(ENDPOINT), { method: "GET" });
     const data = await res.json();
     if (!data?.ok || !Array.isArray(data.rows)) return [];
     return (data.rows as CapturedRow[]).filter(
@@ -147,7 +161,7 @@ export interface FullRow {
 export async function fetchFullRows(): Promise<FullRow[]> {
   if (!ENDPOINT) return [];
   try {
-    const res = await fetch(`${ENDPOINT}?mode=full`, { method: "GET" });
+    const res = await fetch(withToken(`${ENDPOINT}?mode=full`), { method: "GET" });
     const data = await res.json();
     if (!data?.ok || !Array.isArray(data.rows)) return [];
     return data.rows as FullRow[];
@@ -171,7 +185,7 @@ export interface RemoteLoading {
 export async function fetchLoadings(): Promise<RemoteLoading[]> {
   if (!ENDPOINT) return [];
   try {
-    const res = await fetch(`${ENDPOINT}?mode=loadings`, { method: "GET" });
+    const res = await fetch(withToken(`${ENDPOINT}?mode=loadings`), { method: "GET" });
     const data = await res.json();
     if (!data?.ok || !Array.isArray(data.rows)) return [];
     return data.rows as RemoteLoading[];
@@ -193,7 +207,7 @@ export interface Catalog {
 export async function fetchCatalog(): Promise<Catalog> {
   if (!ENDPOINT) return { orders: [] };
   try {
-    const res = await fetch(`${ENDPOINT}?mode=catalog`, { method: "GET" });
+    const res = await fetch(withToken(`${ENDPOINT}?mode=catalog`), { method: "GET" });
     const data = await res.json();
     if (!data?.ok) return { orders: [] };
     const raw: unknown = data.orders;
@@ -249,7 +263,7 @@ export async function editProductionRow(p: EditPayload): Promise<{ ok: boolean }
       mode: "no-cors",
       keepalive: true,
       headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify(p),
+      body: JSON.stringify(withTokenBody(p)),
     });
     return { ok: true };
   } catch (e) {
@@ -294,7 +308,7 @@ export interface MasterRangeRow {
 export async function fetchMasterDay(date: string): Promise<MasterRow[]> {
   if (!ENDPOINT) return [];
   try {
-    const res = await fetch(`${ENDPOINT}?mode=master-day&date=${encodeURIComponent(date)}`, { method: "GET" });
+    const res = await fetch(withToken(`${ENDPOINT}?mode=master-day&date=${encodeURIComponent(date)}`), { method: "GET" });
     const data = await res.json();
     if (!data?.ok || !Array.isArray(data.rows)) return [];
     return data.rows as MasterRow[];
@@ -308,7 +322,7 @@ export async function fetchMasterRange(from: string, to: string): Promise<Master
   if (!ENDPOINT) return [];
   try {
     const res = await fetch(
-      `${ENDPOINT}?mode=master-range&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+      withToken(`${ENDPOINT}?mode=master-range&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
       { method: "GET" },
     );
     const data = await res.json();
@@ -323,7 +337,7 @@ export async function fetchMasterRange(from: string, to: string): Promise<Master
 export async function fetchMasterOrders(): Promise<Record<string, unknown>[]> {
   if (!ENDPOINT) return [];
   try {
-    const res = await fetch(`${ENDPOINT}?mode=master-orders`, { method: "GET" });
+    const res = await fetch(withToken(`${ENDPOINT}?mode=master-orders`), { method: "GET" });
     const data = await res.json();
     if (!data?.ok || !Array.isArray(data.rows)) return [];
     return data.rows as Record<string, unknown>[];
@@ -355,7 +369,7 @@ export interface ReceivableRow {
 export async function fetchMasterReceivables(): Promise<ReceivableRow[]> {
   if (!ENDPOINT) return [];
   try {
-    const res = await fetch(`${ENDPOINT}?mode=master-receivables`, { method: "GET" });
+    const res = await fetch(withToken(`${ENDPOINT}?mode=master-receivables`), { method: "GET" });
     const data = await res.json();
     if (!data?.ok || !Array.isArray(data.rows)) return [];
     return data.rows as ReceivableRow[];
@@ -392,7 +406,7 @@ export interface CashflowData {
 export async function fetchCashflow(): Promise<CashflowData | null> {
   if (!ENDPOINT) return null;
   try {
-    const res = await fetch(`${ENDPOINT}?mode=cashflow`, { method: "GET" });
+    const res = await fetch(withToken(`${ENDPOINT}?mode=cashflow`), { method: "GET" });
     const data = await res.json();
     if (!data?.ok || !data.cashflow) return null;
     return data.cashflow as CashflowData;
@@ -428,7 +442,7 @@ export async function fetchCashLedger(f: CashLedgerFilter = {}): Promise<CashLed
   if (f.account) params.set("account", f.account);
   if (f.direction) params.set("direction", f.direction);
   try {
-    const res = await fetch(`${ENDPOINT}?${params.toString()}`, { method: "GET" });
+    const res = await fetch(withToken(`${ENDPOINT}?${params.toString()}`), { method: "GET" });
     const data = await res.json();
     if (!data?.ok || !Array.isArray(data.rows)) return [];
     return data.rows as CashLedgerEntry[];
@@ -464,7 +478,7 @@ export async function fetchCapex(project: string = "6 Looms"): Promise<CapexData
   if (!ENDPOINT) return null;
   const params = new URLSearchParams({ mode: "capex", project });
   try {
-    const res = await fetch(`${ENDPOINT}?${params.toString()}`, { method: "GET" });
+    const res = await fetch(withToken(`${ENDPOINT}?${params.toString()}`), { method: "GET" });
     const data = await res.json();
     if (!data?.ok || !data.capex) return null;
     return data.capex as CapexData;
