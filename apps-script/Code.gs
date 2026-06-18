@@ -105,6 +105,20 @@ var TWILIO_SID = PropertiesService.getScriptProperties().getProperty("TWILIO_SID
 var TWILIO_AUTH = PropertiesService.getScriptProperties().getProperty("TWILIO_AUTH") || "";
 var TWILIO_FROM = PropertiesService.getScriptProperties().getProperty("TWILIO_FROM") || ""; // e.g. whatsapp:+14155238886
 
+// CallMeBot — free WhatsApp relay (no Twilio account needed).
+// One-time setup on the RECEIVING phone:
+//   1. Save +34 644 51 95 23 as a contact.
+//   2. Send it the WhatsApp message: I allow callmebot to send me messages
+//   3. It replies with an API key. Store the values in Script Properties:
+//        CALLMEBOT_PHONE  → recipient number with country code, e.g. +919940111315
+//        CALLMEBOT_APIKEY → the key it returned
+// Note: CallMeBot delivers to ONE registered number per key, not a group.
+var CALLMEBOT_PHONE  = PropertiesService.getScriptProperties().getProperty("CALLMEBOT_PHONE")  || "";
+var CALLMEBOT_APIKEY = PropertiesService.getScriptProperties().getProperty("CALLMEBOT_APIKEY") || "";
+
+// Channel selector (Script Property WA_PROVIDER): "twilio" (default), "callmebot", or "both".
+var WA_PROVIDER = (PropertiesService.getScriptProperties().getProperty("WA_PROVIDER") || "twilio").toLowerCase();
+
 // Shared-secret API token (set in Project Settings → Script Properties as API_TOKEN).
 // Phase control:
 //   API_TOKEN unset            → endpoint stays fully open (legacy behaviour).
@@ -453,7 +467,14 @@ function _notifyLoading(p) {
   _waSend(msg);
 }
 
+// Route a message through the configured provider(s). Both paths fail silently.
 function _waSend(body) {
+  if (WA_PROVIDER === "callmebot") { _waSendCallMeBot(body); return; }
+  if (WA_PROVIDER === "both")      { _waSendTwilio(body); _waSendCallMeBot(body); return; }
+  _waSendTwilio(body); // default
+}
+
+function _waSendTwilio(body) {
   if (!TWILIO_SID || !TWILIO_AUTH || !TWILIO_FROM) return;
   try {
     UrlFetchApp.fetch("https://api.twilio.com/2010-04-01/Accounts/" + TWILIO_SID + "/Messages.json", {
@@ -462,6 +483,20 @@ function _waSend(body) {
       payload: { From: _waAddr(TWILIO_FROM), To: _waAddr(WA_RELAY_NUMBER), Body: body },
       muteHttpExceptions: true,
     });
+  } catch (err) { /* silent */ }
+}
+
+// CallMeBot delivers via a simple authenticated GET. The phone must be digits
+// with country code (no "+", no spaces); the key is the one returned at signup.
+function _waSendCallMeBot(body) {
+  if (!CALLMEBOT_PHONE || !CALLMEBOT_APIKEY) return;
+  try {
+    var phone = String(CALLMEBOT_PHONE).replace(/[^0-9]/g, "");
+    var url = "https://api.callmebot.com/whatsapp.php"
+      + "?phone="  + encodeURIComponent(phone)
+      + "&text="   + encodeURIComponent(body)
+      + "&apikey=" + encodeURIComponent(CALLMEBOT_APIKEY);
+    UrlFetchApp.fetch(url, { method: "get", muteHttpExceptions: true });
   } catch (err) { /* silent */ }
 }
 
@@ -538,6 +573,30 @@ function diagnoseWhatsApp() {
       payload: { From: _waAddr(TWILIO_FROM), To: _waAddr(WA_RELAY_NUMBER), Body: "SAT test ✅ " + _istStamp() },
       muteHttpExceptions: true,
     }
+  );
+  Logger.log("HTTP status: " + resp.getResponseCode());
+  Logger.log("Response: " + resp.getContentText());
+}
+
+// Diagnostic for CallMeBot — run this, then open View → Logs (or Executions).
+// Prints the API response so a failed send is no longer silent.
+function diagnoseCallMeBot() {
+  Logger.log("WA_PROVIDER: " + WA_PROVIDER);
+  Logger.log("CALLMEBOT_PHONE: " + (CALLMEBOT_PHONE || "NO"));
+  Logger.log("CALLMEBOT_APIKEY set: " + (CALLMEBOT_APIKEY ? "yes" : "NO"));
+
+  if (!CALLMEBOT_PHONE || !CALLMEBOT_APIKEY) {
+    Logger.log("ABORT: set CALLMEBOT_PHONE and CALLMEBOT_APIKEY in Project Settings → Script Properties.");
+    return;
+  }
+
+  var phone = String(CALLMEBOT_PHONE).replace(/[^0-9]/g, "");
+  var resp = UrlFetchApp.fetch(
+    "https://api.callmebot.com/whatsapp.php"
+      + "?phone="  + encodeURIComponent(phone)
+      + "&text="   + encodeURIComponent("SAT CallMeBot test ✅ " + _istStamp())
+      + "&apikey="  + encodeURIComponent(CALLMEBOT_APIKEY),
+    { method: "get", muteHttpExceptions: true }
   );
   Logger.log("HTTP status: " + resp.getResponseCode());
   Logger.log("Response: " + resp.getContentText());
