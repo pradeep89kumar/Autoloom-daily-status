@@ -113,7 +113,7 @@ var TWILIO_FROM = PropertiesService.getScriptProperties().getProperty("TWILIO_FR
 //                                    PWA keeps working until it ships the token.
 //   API_TOKEN set + REQUIRED=true  → enforced: every request must carry the token.
 var API_TOKEN = PropertiesService.getScriptProperties().getProperty("API_TOKEN") || "";
-var API_TOKEN_REQUIRED = false;
+var API_TOKEN_REQUIRED = true;
 
 // Ensure a phone number carries the whatsapp: channel prefix Twilio requires.
 // Accepts "+14155238886", "whatsapp:+14155238886", or "14155238886".
