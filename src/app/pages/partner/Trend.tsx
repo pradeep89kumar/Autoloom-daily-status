@@ -37,6 +37,11 @@ const LOOMS = LOOM_CATALOG.map((l) => l.name);
 const MONTHLY_TARGET = 1500000;
 // Per-loom/day target implied by ₹15L ÷ 30 ÷ 14 ≈ ₹3,571, rounded.
 const PER_LOOM_DAY_TARGET = 3500;
+// Daily revenue target for the full 14-loom fleet — ₹15L ÷ 30 days = a round
+// ₹50,000/day. Split evenly across the loom catalog so the chart's
+// active-aware target lands on ₹50,000 when every loom is running.
+const DAILY_FLEET_TARGET = 50000;
+const PER_LOOM_CHART_TARGET = DAILY_FLEET_TARGET / LOOMS.length;
 // New looms were rolled out on this date; rows before it are copy-forward
 // phantoms that never physically ran.
 const NEW_LOOM_START = "2026-06-07";
@@ -358,7 +363,7 @@ export function PartnerTrend() {
         loading || !rows ? (
           <div className="h-64 bg-black/[0.04] rounded-xl animate-pulse mb-6" />
         ) : (
-          <IncomeLineSection rows={rows} dates={dates} />
+          <IncomeLineSection rows={rows} mtdRows={mtdRows} dates={dates} monthStart={monthStart} />
         )
       ) : null}
 
@@ -900,19 +905,43 @@ interface IncomePoint {
   partial: boolean;
 }
 
-function IncomeLineSection({ rows, dates }: { rows: MasterRangeRow[]; dates: Date[] }) {
-  const [range, setRange] = useState<7 | 14>(14);
+function IncomeLineSection({
+  rows,
+  mtdRows,
+  dates,
+  monthStart,
+}: {
+  rows: MasterRangeRow[];
+  mtdRows: MasterRangeRow[] | null;
+  dates: Date[];
+  monthStart: Date;
+}) {
+  const [mode, setMode] = useState<"month" | "7d">("month");
   const [selected, setSelected] = useState<Set<string>>(() => new Set(LOOMS));
 
-  const shownDates = useMemo(
-    () => (range === 7 ? dates.slice(-7) : dates),
-    [dates, range],
-  );
+  // Month-to-date calendar days (1st → today), for the "this month" option.
+  const monthDates = useMemo(() => {
+    const out: Date[] = [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const d = new Date(monthStart);
+    d.setHours(0, 0, 0, 0);
+    while (d <= today) {
+      out.push(new Date(d));
+      d.setDate(d.getDate() + 1);
+    }
+    return out;
+  }, [monthStart]);
+
+  // "7d" reads from the rolling 14-day window (spans month boundaries);
+  // "month" reads from the month-to-date rows.
+  const shownDates = mode === "7d" ? dates.slice(-7) : monthDates;
+  const sourceRows = mode === "7d" ? rows : mtdRows || [];
 
   const data = useMemo<IncomePoint[]>(() => {
     // Sum revenue per date|loom, but only for the looms the partner has on.
     const rev = new Map<string, number>();
-    for (const r of rows) {
+    for (const r of sourceRows) {
       if (!selected.has(r.loom)) continue;
       const k = `${r.date}|${r.loom}`;
       rev.set(k, (rev.get(k) || 0) + r.revenue);
@@ -931,14 +960,16 @@ function IncomeLineSection({ rows, dates }: { rows: MasterRangeRow[]; dates: Dat
         date: ds,
         label: String(d.getDate()),
         income,
-        target: expected * PER_LOOM_DAY_TARGET,
+        target: Math.round(expected * PER_LOOM_CHART_TARGET),
         partial: i === lastIdx,
       };
     });
-  }, [rows, shownDates, selected]);
+  }, [sourceRows, shownDates, selected]);
 
   const total = useMemo(() => data.reduce((s, p) => s + p.income, 0), [data]);
   const allOn = selected.size === LOOMS.length;
+  // Full-fleet daily target for the current selection (legend readout).
+  const fleetTarget = Math.round(selected.size * PER_LOOM_CHART_TARGET);
 
   const toggle = (loom: string) =>
     setSelected((prev) => {
@@ -959,21 +990,24 @@ function IncomeLineSection({ rows, dates }: { rows: MasterRangeRow[]; dates: Dat
         <div>
           <div className="text-[13px] font-semibold text-[var(--color-text-primary)]">வருமானம் / நாள்</div>
           <div className="text-[12px] text-[var(--color-text-secondary)] tabular-nums">
-            மொத்தம் {fmtRupees(total)} · {range} நாட்கள்
+            மொத்தம் {fmtRupees(total)} · {shownDates.length} நாட்கள்
           </div>
         </div>
         <div className="inline-flex rounded-md bg-black/[0.04] p-0.5 text-[12px] font-medium">
-          {[7, 14].map((n) => (
+          {([
+            { key: "7d", label: "7 நாள்" },
+            { key: "month", label: "இந்த மாதம்" },
+          ] as const).map((opt) => (
             <button
-              key={n}
-              onClick={() => setRange(n as 7 | 14)}
+              key={opt.key}
+              onClick={() => setMode(opt.key)}
               className={`px-2.5 py-1 rounded transition-colors ${
-                range === n
+                mode === opt.key
                   ? "bg-white text-[var(--color-text-primary)] shadow-sm"
                   : "text-[var(--color-text-secondary)]"
               }`}
             >
-              {n}
+              {opt.label}
             </button>
           ))}
         </div>
@@ -1021,6 +1055,18 @@ function IncomeLineSection({ rows, dates }: { rows: MasterRangeRow[]; dates: Dat
             />
           </LineChart>
         </ResponsiveContainer>
+      </div>
+
+      {/* Legend — what each line means */}
+      <div className="flex items-center gap-4 mt-1 px-1 text-[12px] text-[var(--color-text-secondary)]">
+        <span className="inline-flex items-center gap-1.5">
+          <span className="inline-block w-4 h-[2.5px] rounded-full bg-[var(--color-status-green)]" />
+          வருமானம்
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="inline-block w-4 border-t-[1.5px] border-dashed border-[var(--color-text-secondary)]" />
+          இலக்கு · {fmtRupees(fleetTarget)}/நாள்
+        </span>
       </div>
 
       {/* Loom filter */}
