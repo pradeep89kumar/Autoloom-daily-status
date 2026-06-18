@@ -97,9 +97,23 @@ export function submitLoadingToSheet(p: LoadingPayload): void {
 
 export async function logVisit(): Promise<void> {
   // Best-effort access logging — geo comes from the Vercel edge function, which
-  // only returns real data on the deployed domain. Never disrupt the app.
+  // only returns real data on the deployed domain. Geo is strictly optional: if
+  // the edge function is unavailable or returns non-JSON, log the visit anyway
+  // with blank geo rather than dropping the row entirely. Never disrupt the app.
+  let g: Partial<{
+    country: string;
+    region: string;
+    city: string;
+    latitude: string;
+    longitude: string;
+  }> = {};
   try {
-    const g = await fetch("/api/geo").then((r) => r.json());
+    const r = await fetch("/api/geo");
+    if (r.ok) g = await r.json();
+  } catch {
+    /* geo unavailable — fall through and log the visit with blank geo */
+  }
+  try {
     void submitToSheet({
       kind: "visit",
       capturedAt: new Date().toISOString(),
