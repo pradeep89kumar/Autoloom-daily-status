@@ -902,7 +902,7 @@ interface IncomePoint {
   label: string;
   income: number;
   target: number;
-  partial: boolean;
+  latest: boolean;
 }
 
 // Wide row for the by-loom view: one numeric key per loom (null on days the
@@ -910,7 +910,7 @@ interface IncomePoint {
 interface ByLoomPoint {
   date: string;
   label: string;
-  partial: boolean;
+  latest: boolean;
   target: number;
   [loom: string]: number | string | boolean | null;
 }
@@ -979,14 +979,15 @@ function IncomeLineSection({
   // null = follow the auto-derived default; a concrete Set = user override.
   const [selected, setSelected] = useState<Set<string> | null>(null);
 
-  // Month-to-date calendar days (1st → today), for the "this month" option.
+  // Month-to-date calendar days (1st → yesterday) — today is never charted, as
+  // it is still in progress; the most recent complete day is the live point.
   const monthDates = useMemo(() => {
     const out: Date[] = [];
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const d = new Date(monthStart);
     d.setHours(0, 0, 0, 0);
-    while (d <= today) {
+    while (d < today) {
       out.push(new Date(d));
       d.setDate(d.getDate() + 1);
     }
@@ -994,8 +995,9 @@ function IncomeLineSection({
   }, [monthStart]);
 
   // "7d" reads from the rolling 14-day window (spans month boundaries);
-  // "month" reads from the month-to-date rows.
-  const shownDates = mode === "7d" ? dates.slice(-7) : monthDates;
+  // "month" reads from the month-to-date rows. Both exclude today — slice(-8, -1)
+  // yields the seven complete days ending yesterday.
+  const shownDates = mode === "7d" ? dates.slice(-8, -1) : monthDates;
   const sourceRows = mode === "7d" ? rows : mtdRows || [];
 
   // Auto default tracks the data/range until the partner picks looms manually.
@@ -1027,7 +1029,7 @@ function IncomeLineSection({
         label: String(d.getDate()),
         income,
         target: Math.round(expected * PER_LOOM_CHART_TARGET),
-        partial: i === lastIdx,
+        latest: i === lastIdx,
       };
     });
   }, [sourceRows, shownDates]);
@@ -1045,7 +1047,7 @@ function IncomeLineSection({
       const point: ByLoomPoint = {
         date: ds,
         label: String(d.getDate()),
-        partial: i === lastIdx,
+        latest: i === lastIdx,
         target: PER_LOOM_TARGET_ROUND,
       };
       for (const loom of LOOMS) {
@@ -1239,21 +1241,19 @@ function IncomeLineSection({
   );
 }
 
-// Only the last (partial / in-progress) day gets a hollow, dimmed marker so it
-// reads as "not a full day yet". All other points stay on the clean line.
+// The most recent complete day gets a live, pulsing marker — an expanding ring
+// that fades out — signalling the trend is ongoing and will continue.
 function IncomeDot(props: { cx?: number; cy?: number; payload?: IncomePoint }) {
   const { cx, cy, payload } = props;
-  if (cx == null || cy == null || !payload || !payload.partial) return null;
+  if (cx == null || cy == null || !payload || !payload.latest) return null;
   return (
-    <circle
-      cx={cx}
-      cy={cy}
-      r={3.5}
-      fill="white"
-      stroke="var(--color-status-green)"
-      strokeWidth={1.5}
-      opacity={0.55}
-    />
+    <g>
+      <circle cx={cx} cy={cy} r={4} fill="var(--color-status-green)" opacity={0.5}>
+        <animate attributeName="r" values="4;10" dur="1.5s" repeatCount="indefinite" />
+        <animate attributeName="opacity" values="0.5;0" dur="1.5s" repeatCount="indefinite" />
+      </circle>
+      <circle cx={cx} cy={cy} r={4} fill="var(--color-status-green)" stroke="white" strokeWidth={1.5} />
+    </g>
   );
 }
 
@@ -1270,7 +1270,6 @@ function IncomeTooltip({
     <div className="rounded-md bg-[var(--color-text-primary)] text-white px-2.5 py-1.5 text-[12px] shadow-lg">
       <div className="font-semibold tabular-nums">{fmtRupees(p.income)}</div>
       <div className="opacity-70 tabular-nums">இலக்கு {fmtRupees(p.target)}</div>
-      {p.partial ? <div className="opacity-60 mt-0.5">இன்று · பகுதி தரவு</div> : null}
     </div>
   );
 }
@@ -1302,7 +1301,6 @@ function ByLoomTooltip({
       <div className="opacity-60 mt-1 pt-1 border-t border-white/20 tabular-nums">
         இலக்கு {fmtRupees(PER_LOOM_TARGET_ROUND)}
       </div>
-      {p.partial ? <div className="opacity-60 mt-0.5">இன்று · பகுதி தரவு</div> : null}
     </div>
   );
 }
