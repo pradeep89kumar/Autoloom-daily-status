@@ -5,6 +5,19 @@ import { fmtRupees } from "../../lib/partnerCopy";
 
 type FilterKey = "all" | "pending" | "overdue" | "partial" | "unbilled";
 
+// Bill amount is GST-inclusive (5%, mostly uniform). Per CBDT Circular 23/2017,
+// TDS is deducted on the taxable value (pre-GST), not on the GST. So strip GST
+// first, then apply the 2% 194C company-contractor rate. The cash actually
+// received lands below the bill amount.
+const GST_RATE = 0.05;
+const TDS_RATE = 0.02;
+
+function netAfterTds(amount: number): number {
+  const taxableBase = amount / (1 + GST_RATE);
+  const tds = taxableBase * TDS_RATE;
+  return Math.round(amount - tds);
+}
+
 function fromYmd(s: string): Date | null {
   if (!s) return null;
   const [y, m, d] = s.split("-").map(Number);
@@ -237,6 +250,9 @@ export function PartnerReceivables() {
         ) : (
           <>
             <p className="text-[22px] font-bold tabular-nums text-[var(--color-text-primary)] mt-0.5">{fmtRupees(grandTotal)}</p>
+            <p className="text-[14px] font-semibold tabular-nums text-[var(--color-text-secondary)] mt-0.5">
+              After TDS {fmtRupees(netAfterTds(grandTotal))}
+            </p>
             <p className="text-[14px] text-[var(--color-text-secondary)] mt-0.5">
               Across {grouped.length} {grouped.length === 1 ? "party" : "parties"} ·{" "}
               {merged.length} {merged.length === 1 ? "invoice" : "invoices"}
@@ -360,9 +376,14 @@ export function PartnerReceivables() {
                           ) : (
                             <span />
                           )}
-                          <span className="text-[18px] font-bold tabular-nums text-[var(--color-text-primary)]">
-                            {fmtRupees(r.invoiceAmount)}
-                          </span>
+                          <div className="flex flex-col items-end">
+                            <span className="text-[18px] font-bold tabular-nums text-[var(--color-text-primary)]">
+                              {fmtRupees(r.invoiceAmount)}
+                            </span>
+                            <span className="text-[12px] font-medium tabular-nums text-[var(--color-text-secondary)]">
+                              After TDS {fmtRupees(netAfterTds(r.invoiceAmount))}
+                            </span>
+                          </div>
                         </div>
                       </li>
                     );
