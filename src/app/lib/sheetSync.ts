@@ -51,7 +51,7 @@ export interface VisitPayload {
   userAgent: string;
 }
 
-export type SheetPayload = ProductionEntryPayload | LoadingPayload | VisitPayload;
+export type SheetPayload = ProductionEntryPayload | LoadingPayload | VisitPayload | DesignPayload;
 
 const ENDPOINT = import.meta.env.VITE_SHEET_WEBHOOK_URL as string | undefined;
 const API_TOKEN = (import.meta.env.VITE_API_TOKEN as string | undefined) || "";
@@ -390,6 +390,144 @@ export async function fetchMasterReceivables(): Promise<ReceivableRow[]> {
   } catch (e) {
     console.warn("[sheetSync] fetchMasterReceivables failed", e);
     return [];
+  }
+}
+
+/* ------------------------------ design master (loom setup) ------------------------------ */
+
+export interface DesignWarpBand {
+  seq: number;
+  count: string;
+  colour: string;
+  layer?: string;   // "base" | "top" | "3rd" for double cloth; blank otherwise
+  ends: number;
+  extra: number;
+}
+
+export interface DesignWeftBand {
+  seq: number;
+  count: string;
+  colour: string;
+  picks: number;
+  extra: number;
+}
+
+export interface DesignDraft {
+  draftOrder: string;       // e.g. "1,2,3,4;5,6,7,8" (semicolon = new line)
+  totalShafts: number;
+  totalPicks: number;
+  pegPlanImageRef: string;  // Drive URL of the dobby/peg grid crop
+  pegPlanJson?: string;     // optional encoded grid for a future editor
+}
+
+export interface DesignRecord {
+  designId: string;
+  designNo: string;
+  designName: string;
+  sourceFirm: string;
+  receivedDate: string;     // YYYY-MM-DD
+  weaveType: string;
+  reed: string;             // kept as string — fractions like "65½" occur
+  reedOrder: string;
+  pickPPI: string;
+  warpCount: string;
+  weftCount: string;
+  warpWidthIn: string;
+  clothWidthIn: string;
+  totalEnds: number;
+  composition: string;
+  constructionRaw: string;
+  repeatEnds: number;
+  noOfRepeat: number;
+  extraEnds: number;
+  totalShafts: number;
+  totalPicks: number;
+  warpSeqText: string;
+  weftSeqText: string;
+  sourceImageRefs: string;
+  pegPlanImageRef: string;
+  capturedBy: string;
+  capturedAt: string;
+  rawText: string;
+  confidence: number | null;
+  notes: string;
+  // Populated only by fetchDesign (single record), not by the list endpoint:
+  warp?: DesignWarpBand[];
+  weft?: DesignWeftBand[];
+  draft?: DesignDraft | null;
+}
+
+export interface DesignPayload {
+  kind: "design";
+  designId?: string;        // omit to create a new design; include to upsert
+  designNo: string;
+  designName?: string;
+  sourceFirm?: string;
+  receivedDate?: string;    // YYYY-MM-DD
+  weaveType?: string;
+  reed?: string | number;
+  reedOrder?: string | number;
+  pickPPI?: string | number;
+  warpCount?: string;
+  weftCount?: string;
+  warpWidthIn?: string | number;
+  clothWidthIn?: string | number;
+  totalEnds?: number;
+  composition?: string;
+  constructionRaw?: string;
+  repeatEnds?: number;
+  noOfRepeat?: number;
+  extraEnds?: number;
+  totalShafts?: number;
+  totalPicks?: number;
+  warpSeqText?: string;     // optional — backend regenerates if omitted
+  weftSeqText?: string;
+  sourceImageRefs?: string;
+  pegPlanImageRef?: string;
+  capturedBy?: string;
+  capturedAt?: string;      // ISO; backend stamps to IST
+  rawText?: string;
+  confidence?: number;
+  notes?: string;
+  warp?: DesignWarpBand[];
+  weft?: DesignWeftBand[];
+  draft?: DesignDraft;
+}
+
+// Upsert a captured design. Fire-and-forget (no-cors), like the other writers.
+export async function submitDesign(p: DesignPayload): Promise<{ ok: boolean }> {
+  return submitToSheet(p);
+}
+
+// List captured designs (newest first). Parent rows only — no warp/weft bands.
+export async function fetchDesigns(): Promise<DesignRecord[]> {
+  if (!ENDPOINT) return [];
+  try {
+    const res = await fetch(withToken(`${ENDPOINT}?mode=designs`), { method: "GET" });
+    const data = await res.json();
+    if (!data?.ok || !Array.isArray(data.rows)) return [];
+    return data.rows as DesignRecord[];
+  } catch (e) {
+    console.warn("[sheetSync] fetchDesigns failed", e);
+    return [];
+  }
+}
+
+// One full design with reconstructed warp[], weft[] and draft. Look up by
+// Design ID or by the printed Design No.
+export async function fetchDesign(opts: { id?: string; no?: string }): Promise<DesignRecord | null> {
+  if (!ENDPOINT) return null;
+  const params = new URLSearchParams({ mode: "design" });
+  if (opts.id) params.set("id", opts.id);
+  if (opts.no) params.set("no", opts.no);
+  try {
+    const res = await fetch(withToken(`${ENDPOINT}?${params.toString()}`), { method: "GET" });
+    const data = await res.json();
+    if (!data?.ok || !data.design) return null;
+    return data.design as DesignRecord;
+  } catch (e) {
+    console.warn("[sheetSync] fetchDesign failed", e);
+    return null;
   }
 }
 

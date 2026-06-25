@@ -21,6 +21,9 @@
  *  GET  ?mode=capex&project=6%20Looms          → Capex Register entries + totals for one project (default "6 Looms")
  *  GET  ?mode=beams                            → Beam Register tables from R.O STATUS tab (loaded/vendor/ready/empty/master)
  *  POST kind:"edit"           → overwrite Sheet1 row by rowIndex, only inside edit window
+ *  POST kind:"design"         → upsert a loom-setup design (Designs + DesignWarp/Weft/Draft tabs)
+ *  GET  ?mode=designs                          → list captured designs (newest first)
+ *  GET  ?mode=design&id=…  | &no=…             → one design with warp[], weft[], draft
  */
 
 var SHEET_ID = "1EJ_5mWO5QEY-6gpWfv2nsG778BrFUw9xv3J0d0NH-1A";
@@ -44,6 +47,13 @@ var BEAM_TAB = "R.O STATUS";
 
 // Visit log — access tracking (country/region/city/lat/long) appended on each session.
 var VISITS_TAB = "Visits";
+
+// Design master (loom setup sheets) — parent + warp/weft/draft child tabs, all
+// in THIS workbook (SHEET_ID), joined by a stable Design ID.
+var DESIGNS_TAB      = "Designs";
+var DESIGN_WARP_TAB  = "DesignWarp";
+var DESIGN_WEFT_TAB  = "DesignWeft";
+var DESIGN_DRAFT_TAB = "DesignDraft";
 
 // Capex Register columns (1-indexed, A..G only — only G-and-left are critical):
 //  A Date · B Project · C Expense · D Vendor · E Amount · F Paid From · G Funding Source
@@ -241,6 +251,14 @@ function doGet(e) {
   if (mode === "beams") {
     return _readBeams();
   }
+  if (mode === "designs") {
+    return _json({ ok: true, rows: _readDesigns() });
+  }
+  if (mode === "design") {
+    var dId = (e.parameter && e.parameter.id) || "";
+    var dNo = (e.parameter && e.parameter.no) || "";
+    return _json({ ok: true, design: _readDesign(dId, dNo) });
+  }
   return _json({ ok: true, rows: _readLightRows(21) });
 }
 
@@ -255,6 +273,7 @@ function doPost(e) {
   if (p.kind === "loading")     return _logLoading(p);
   if (p.kind === "edit")        return _editProduction(p);
   if (p.kind === "visit")       return _logVisit(p);
+  if (p.kind === "design")      return _logDesign(p);
   return _json({ ok: false, error: "unknown kind" });
 }
 
@@ -321,6 +340,317 @@ function diagnoseVisit() {
     path: "/diagnostic", userAgent: "diagnoseVisit() manual run"
   });
   Logger.log("Appended a TEST row. Check the bottom of the \"" + VISITS_TAB + "\" tab; total rows now: " + sh.getLastRow());
+}
+
+/* ------------------------------ design master (loom setup) ------------------------------ */
+/**
+ * Loom setup sheets captured from supplier design documents (printed or
+ * handwritten). One parent row in "Designs" plus ordered child rows in
+ * "DesignWarp" / "DesignWeft" and an optional "DesignDraft" row, all joined by a
+ * stable Design ID. Variable-length warp/weft colour bands live as child rows
+ * (never packed into one cell), so the structured warp/weft tables are
+ * reconstructed on read. Consumed by fetchDesigns / fetchDesign in sheetSync.ts.
+ */
+
+function _designsSheet() {
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var sh = ss.getSheetByName(DESIGNS_TAB);
+  if (!sh) {
+    sh = ss.insertSheet(DESIGNS_TAB);
+    sh.appendRow([
+      "Design ID", "Design No", "Design Name", "Source Firm", "Received Date",
+      "Weave Type", "Reed", "Reed Order", "Pick PPI", "Warp Count", "Weft Count",
+      "Warp Width In", "Cloth Width In", "Total Ends", "Composition", "Construction Raw",
+      "Repeat Ends", "No Of Repeat", "Extra Ends", "Total Shafts", "Total Picks",
+      "Warp Seq Text", "Weft Seq Text", "Source Image Refs", "Peg Plan Image Ref",
+      "Captured By", "Captured At", "Raw Text", "Confidence", "Notes"
+    ]);
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
+function _designWarpSheet() {
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var sh = ss.getSheetByName(DESIGN_WARP_TAB);
+  if (!sh) {
+    sh = ss.insertSheet(DESIGN_WARP_TAB);
+    sh.appendRow(["Design ID", "Seq", "Count", "Colour", "Layer", "Ends", "Extra"]);
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
+function _designWeftSheet() {
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var sh = ss.getSheetByName(DESIGN_WEFT_TAB);
+  if (!sh) {
+    sh = ss.insertSheet(DESIGN_WEFT_TAB);
+    sh.appendRow(["Design ID", "Seq", "Count", "Colour", "Picks", "Extra"]);
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
+function _designDraftSheet() {
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var sh = ss.getSheetByName(DESIGN_DRAFT_TAB);
+  if (!sh) {
+    sh = ss.insertSheet(DESIGN_DRAFT_TAB);
+    sh.appendRow(["Design ID", "Draft Order", "Total Shafts", "Total Picks", "Peg Plan Image Ref", "Peg Plan Json"]);
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
+// Run once from the Apps Script editor to create all four design tabs (with
+// headers) in this workbook. Safe to re-run — existing tabs are left untouched.
+function installDesignTabs() {
+  _designsSheet();
+  _designWarpSheet();
+  _designWeftSheet();
+  _designDraftSheet();
+  Logger.log("Design tabs ready in workbook " + SHEET_ID + ": " +
+    [DESIGNS_TAB, DESIGN_WARP_TAB, DESIGN_WEFT_TAB, DESIGN_DRAFT_TAB].join(", "));
+}
+
+function _designId() {
+  return "D-" + Utilities.formatDate(new Date(), "Asia/Kolkata", "yyyyMMdd-HHmmss") +
+    "-" + (Math.floor(Math.random() * 900) + 100);
+}
+
+// Flatten warp/weft bands into a human-readable mirror string for the parent
+// row, e.g. "Khaki×170 · Green×170 · Black×170".
+function _seqText(list, qtyKey) {
+  if (!list || !list.length) return "";
+  var parts = [];
+  for (var i = 0; i < list.length; i++) {
+    var b = list[i] || {};
+    var colour = String(b.colour || "").trim() || "—";
+    var qty = b[qtyKey];
+    parts.push(qty ? colour + "×" + qty : colour);
+  }
+  return parts.join(" · ");
+}
+
+function _findRowByValue(sh, col, val) {
+  var last = sh.getLastRow();
+  if (last < 2) return -1;
+  var values = sh.getRange(2, col, last - 1, 1).getValues();
+  var want = String(val).trim();
+  for (var i = 0; i < values.length; i++) {
+    if (String(values[i][0] || "").trim() === want) return i + 2;
+  }
+  return -1;
+}
+
+// Delete every child row whose column A equals designId, then append the new
+// block. Keeps a re-captured design from accumulating duplicate child rows.
+function _replaceChildren(sh, designId, rows) {
+  var last = sh.getLastRow();
+  if (last >= 2) {
+    var ids = sh.getRange(2, 1, last - 1, 1).getValues();
+    var want = String(designId).trim();
+    for (var i = ids.length - 1; i >= 0; i--) {
+      if (String(ids[i][0] || "").trim() === want) sh.deleteRow(i + 2);
+    }
+  }
+  if (rows && rows.length) {
+    var start = sh.getLastRow() + 1;
+    sh.getRange(start, 1, rows.length, rows[0].length).setValues(rows);
+  }
+}
+
+function _logDesign(p) {
+  var designId = String(p.designId || "").trim() || _designId();
+  var warp = Array.isArray(p.warp) ? p.warp : [];
+  var weft = Array.isArray(p.weft) ? p.weft : [];
+  var warpSeqText = p.warpSeqText || _seqText(warp, "ends");
+  var weftSeqText = p.weftSeqText || _seqText(weft, "picks");
+
+  // Parent — upsert by Design ID.
+  var sh = _designsSheet();
+  var row = [
+    designId,                                  // A
+    p.designNo        || "",                   // B
+    p.designName      || "",                   // C
+    p.sourceFirm      || "",                   // D
+    p.receivedDate    || "",                   // E
+    p.weaveType       || "",                   // F
+    p.reed            || "",                   // G
+    p.reedOrder       || "",                   // H
+    p.pickPPI         || "",                   // I
+    p.warpCount       || "",                   // J
+    p.weftCount       || "",                   // K
+    p.warpWidthIn     || "",                   // L
+    p.clothWidthIn    || "",                   // M
+    p.totalEnds       || "",                   // N
+    p.composition     || "",                   // O
+    p.constructionRaw || "",                   // P
+    p.repeatEnds      || "",                   // Q
+    p.noOfRepeat      || "",                   // R
+    p.extraEnds       || "",                   // S
+    p.totalShafts     || "",                   // T
+    p.totalPicks      || "",                   // U
+    warpSeqText,                               // V
+    weftSeqText,                               // W
+    p.sourceImageRefs || "",                   // X
+    p.pegPlanImageRef || "",                   // Y
+    p.capturedBy      || "",                   // Z
+    _istStamp(p.capturedAt),                   // AA
+    p.rawText         || "",                   // AB
+    p.confidence != null ? p.confidence : "",  // AC
+    p.notes           || ""                    // AD
+  ];
+  var pr = _findRowByValue(sh, 1, designId);
+  if (pr > 0) sh.getRange(pr, 1, 1, row.length).setValues([row]);
+  else sh.appendRow(row);
+
+  // Warp bands.
+  var warpRows = [];
+  for (var i = 0; i < warp.length; i++) {
+    var w = warp[i] || {};
+    warpRows.push([designId, w.seq || (i + 1), w.count || "", w.colour || "", w.layer || "", w.ends || "", w.extra || ""]);
+  }
+  _replaceChildren(_designWarpSheet(), designId, warpRows);
+
+  // Weft bands.
+  var weftRows = [];
+  for (var j = 0; j < weft.length; j++) {
+    var f = weft[j] || {};
+    weftRows.push([designId, f.seq || (j + 1), f.count || "", f.colour || "", f.picks || "", f.extra || ""]);
+  }
+  _replaceChildren(_designWeftSheet(), designId, weftRows);
+
+  // Draft / peg plan (optional, 0..1 row).
+  if (p.draft) {
+    var d = p.draft;
+    _replaceChildren(_designDraftSheet(), designId, [[
+      designId,
+      d.draftOrder || "",
+      d.totalShafts || p.totalShafts || "",
+      d.totalPicks || p.totalPicks || "",
+      d.pegPlanImageRef || p.pegPlanImageRef || "",
+      d.pegPlanJson || ""
+    ]]);
+  }
+
+  return _json({ ok: true, designId: designId });
+}
+
+function _designParentObj(r) {
+  return {
+    designId:        String(r[0] || ""),
+    designNo:        String(r[1] || ""),
+    designName:      String(r[2] || ""),
+    sourceFirm:      String(r[3] || ""),
+    receivedDate:    r[4] ? (_toDate(r[4]) ? _ymd(_toDate(r[4])) : String(r[4])) : "",
+    weaveType:       String(r[5] || ""),
+    reed:            r[6] == null ? "" : String(r[6]),
+    reedOrder:       r[7] == null ? "" : String(r[7]),
+    pickPPI:         r[8] == null ? "" : String(r[8]),
+    warpCount:       String(r[9] || ""),
+    weftCount:       String(r[10] || ""),
+    warpWidthIn:     r[11] == null ? "" : String(r[11]),
+    clothWidthIn:    r[12] == null ? "" : String(r[12]),
+    totalEnds:       Number(r[13]) || 0,
+    composition:     String(r[14] || ""),
+    constructionRaw: String(r[15] || ""),
+    repeatEnds:      Number(r[16]) || 0,
+    noOfRepeat:      Number(r[17]) || 0,
+    extraEnds:       Number(r[18]) || 0,
+    totalShafts:     Number(r[19]) || 0,
+    totalPicks:      Number(r[20]) || 0,
+    warpSeqText:     String(r[21] || ""),
+    weftSeqText:     String(r[22] || ""),
+    sourceImageRefs: String(r[23] || ""),
+    pegPlanImageRef: String(r[24] || ""),
+    capturedBy:      String(r[25] || ""),
+    capturedAt:      r[26] ? String(r[26]) : "",
+    rawText:         String(r[27] || ""),
+    confidence:      (r[28] === "" || r[28] == null) ? null : Number(r[28]),
+    notes:           String(r[29] || "")
+  };
+}
+
+function _readDesigns() {
+  var sh = _designsSheet();
+  var last = sh.getLastRow();
+  if (last < 2) return [];
+  var values = sh.getRange(2, 1, last - 1, 30).getValues();
+  var out = [];
+  for (var i = 0; i < values.length; i++) {
+    if (!String(values[i][0] || "").trim()) continue;
+    out.push(_designParentObj(values[i]));
+  }
+  out.reverse(); // newest first (rows are appended at the bottom)
+  return out;
+}
+
+function _readDesignChildren(sh, designId, kind) {
+  var last = sh.getLastRow();
+  if (last < 2) return [];
+  var width = kind === "warp" ? 7 : 6;
+  var values = sh.getRange(2, 1, last - 1, width).getValues();
+  var want = String(designId).trim();
+  var out = [];
+  for (var i = 0; i < values.length; i++) {
+    var r = values[i];
+    if (String(r[0] || "").trim() !== want) continue;
+    if (kind === "warp") {
+      out.push({ seq: Number(r[1]) || 0, count: String(r[2] || ""), colour: String(r[3] || ""), layer: String(r[4] || ""), ends: Number(r[5]) || 0, extra: Number(r[6]) || 0 });
+    } else {
+      out.push({ seq: Number(r[1]) || 0, count: String(r[2] || ""), colour: String(r[3] || ""), picks: Number(r[4]) || 0, extra: Number(r[5]) || 0 });
+    }
+  }
+  out.sort(function (a, b) { return a.seq - b.seq; });
+  return out;
+}
+
+function _readDesignDraft(designId) {
+  var sh = _designDraftSheet();
+  var last = sh.getLastRow();
+  if (last < 2) return null;
+  var values = sh.getRange(2, 1, last - 1, 6).getValues();
+  var want = String(designId).trim();
+  for (var i = 0; i < values.length; i++) {
+    var r = values[i];
+    if (String(r[0] || "").trim() !== want) continue;
+    return {
+      draftOrder: String(r[1] || ""),
+      totalShafts: Number(r[2]) || 0,
+      totalPicks: Number(r[3]) || 0,
+      pegPlanImageRef: String(r[4] || ""),
+      pegPlanJson: String(r[5] || "")
+    };
+  }
+  return null;
+}
+
+function _readDesign(id, no) {
+  var wantId = String(id || "").trim();
+  var wantNo = String(no || "").trim();
+  if (!wantId && !wantNo) return null;
+  var sh = _designsSheet();
+  var last = sh.getLastRow();
+  if (last < 2) return null;
+  var values = sh.getRange(2, 1, last - 1, 30).getValues();
+  var parent = null, foundId = "";
+  for (var i = 0; i < values.length; i++) {
+    var r = values[i];
+    var rid = String(r[0] || "").trim();
+    var rno = String(r[1] || "").trim();
+    if ((wantId && rid === wantId) || (wantNo && rno === wantNo)) {
+      parent = _designParentObj(r);
+      foundId = rid;
+      break;
+    }
+  }
+  if (!parent) return null;
+  parent.warp = _readDesignChildren(_designWarpSheet(), foundId, "warp");
+  parent.weft = _readDesignChildren(_designWeftSheet(), foundId, "weft");
+  parent.draft = _readDesignDraft(foundId);
+  return parent;
 }
 
 function _appendProduction(p) {
