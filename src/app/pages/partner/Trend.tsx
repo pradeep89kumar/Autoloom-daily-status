@@ -42,6 +42,9 @@ const PER_LOOM_DAY_TARGET = 3500;
 // active-aware target lands on ₹50,000 when every loom is running.
 const DAILY_FLEET_TARGET = 50000;
 const PER_LOOM_CHART_TARGET = DAILY_FLEET_TARGET / LOOMS.length;
+// Celebration accent for days that beat the target line — a warm gold, kept
+// distinct from the amber "warning" tint used elsewhere in the app.
+const GOLD = "#E8A317";
 // New looms were rolled out on this date; rows before it are copy-forward
 // phantoms that never physically ran.
 const NEW_LOOM_START = "2026-06-07";
@@ -1059,6 +1062,11 @@ function IncomeLineSection({
   }, [sourceRows, shownDates]);
 
   const total = useMemo(() => overallData.reduce((s, p) => s + p.income, 0), [overallData]);
+  // Days whose fleet income beat that day's target line — the achievement count.
+  const beatDays = useMemo(
+    () => overallData.filter((p) => p.target > 0 && p.income >= p.target).length,
+    [overallData],
+  );
   const allOn = effSelected.size === LOOMS.length;
   // Full-fleet daily target (legend readout for the overall view).
   const fleetTarget = Math.round(LOOMS.length * PER_LOOM_CHART_TARGET);
@@ -1111,6 +1119,15 @@ function IncomeLineSection({
               ? `மொத்தம் ${fmtRupees(total)} · ${shownDates.length} நாட்கள்`
               : `${effSelected.size} தறி · ${shownDates.length} நாட்கள்`}
           </div>
+          {view === "overall" && beatDays > 0 ? (
+            <div
+              className="mt-0.5 inline-flex items-center gap-1 text-[12px] font-semibold"
+              style={{ color: GOLD }}
+            >
+              <span aria-hidden>⭐</span>
+              <span>{beatDays} நாள் இலக்கைத் தாண்டியது</span>
+            </div>
+          ) : null}
         </div>
         <div className="inline-flex rounded-md bg-black/[0.04] p-0.5 text-[12px] font-medium">
           {([
@@ -1242,18 +1259,53 @@ function IncomeLineSection({
 }
 
 // The most recent complete day gets a live, pulsing marker — an expanding ring
-// that fades out — signalling the trend is ongoing and will continue.
+// that fades out — signalling the trend is ongoing and will continue. Days that
+// beat their target line are celebrated with a calm gold star; if the latest day
+// is also a target-beating day, its pulse turns gold and carries the star.
 function IncomeDot(props: { cx?: number; cy?: number; payload?: IncomePoint }) {
   const { cx, cy, payload } = props;
-  if (cx == null || cy == null || !payload || !payload.latest) return null;
+  if (cx == null || cy == null || !payload) return null;
+  const beat = payload.target > 0 && payload.income >= payload.target;
+
+  if (payload.latest) {
+    const color = beat ? GOLD : "var(--color-status-green)";
+    return (
+      <g>
+        <circle cx={cx} cy={cy} r={4} fill={color} opacity={0.5}>
+          <animate attributeName="r" values="4;10" dur="1.5s" repeatCount="indefinite" />
+          <animate attributeName="opacity" values="0.5;0" dur="1.5s" repeatCount="indefinite" />
+        </circle>
+        {beat ? (
+          <GoldStar cx={cx} cy={cy} />
+        ) : (
+          <circle cx={cx} cy={cy} r={4} fill={color} stroke="white" strokeWidth={1.5} />
+        )}
+      </g>
+    );
+  }
+
+  // Earlier day that beat its target — a calm, static gold star (no motion).
+  if (beat) return <GoldStar cx={cx} cy={cy} />;
+
+  return null;
+}
+
+// A small 5-point gold star, white-outlined so it reads against the green line.
+function GoldStar({ cx, cy }: { cx: number; cy: number }) {
+  const pts: string[] = [];
+  for (let i = 0; i < 10; i++) {
+    const r = i % 2 === 0 ? 6 : 2.6;
+    const a = (Math.PI / 5) * i - Math.PI / 2; // first point at the top
+    pts.push(`${cx + r * Math.cos(a)},${cy + r * Math.sin(a)}`);
+  }
   return (
-    <g>
-      <circle cx={cx} cy={cy} r={4} fill="var(--color-status-green)" opacity={0.5}>
-        <animate attributeName="r" values="4;10" dur="1.5s" repeatCount="indefinite" />
-        <animate attributeName="opacity" values="0.5;0" dur="1.5s" repeatCount="indefinite" />
-      </circle>
-      <circle cx={cx} cy={cy} r={4} fill="var(--color-status-green)" stroke="white" strokeWidth={1.5} />
-    </g>
+    <polygon
+      points={pts.join(" ")}
+      fill={GOLD}
+      stroke="white"
+      strokeWidth={1}
+      strokeLinejoin="round"
+    />
   );
 }
 
