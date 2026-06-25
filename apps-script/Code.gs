@@ -129,6 +129,14 @@ var CALLMEBOT_APIKEY = PropertiesService.getScriptProperties().getProperty("CALL
 // Channel selector (Script Property WA_PROVIDER): "twilio" (default), "callmebot", or "both".
 var WA_PROVIDER = (PropertiesService.getScriptProperties().getProperty("WA_PROVIDER") || "twilio").toLowerCase();
 
+// Design capture — Drive image hosting + Gemini assisted extraction.
+// Set GEMINI_API_KEY in Script Properties. Adding these endpoints introduces
+// DriveApp + external UrlFetchApp scopes, so the script must be re-authorised
+// once (run any function from the editor and accept the prompts) before they work.
+var GEMINI_API_KEY = PropertiesService.getScriptProperties().getProperty("GEMINI_API_KEY") || "";
+var GEMINI_MODEL = "gemini-2.0-flash";
+var DESIGN_IMG_FOLDER = "SAT Design Images";
+
 // Shared-secret API token (set in Project Settings → Script Properties as API_TOKEN).
 // Phase control:
 //   API_TOKEN unset            → endpoint stays fully open (legacy behaviour).
@@ -274,6 +282,8 @@ function doPost(e) {
   if (p.kind === "edit")        return _editProduction(p);
   if (p.kind === "visit")       return _logVisit(p);
   if (p.kind === "design")      return _logDesign(p);
+  if (p.kind === "design-image") return _saveDesignImage(p);
+  if (p.kind === "design-extract") return _extractDesign(p);
   return _json({ ok: false, error: "unknown kind" });
 }
 
@@ -1641,6 +1651,110 @@ function _readBeams() {
     }
 
     return _json({ ok: true, loaded: loaded, vendor: vendor, ready: ready, empty: empty, master: master });
+  } catch (err) {
+    return _json({ ok: false, error: String(err) });
+  }
+}
+
+/* ------------------------------ design capture (Drive + Gemini) ------------------------------ */
+
+// Get-or-create the shared Drive folder that holds captured design photos.
+function _designImageFolder() {
+  var it = DriveApp.getFoldersByName(DESIGN_IMG_FOLDER);
+  if (it.hasNext()) return it.next();
+  return DriveApp.createFolder(DESIGN_IMG_FOLDER);
+}
+
+// Store one captured photo in Drive and return a public-by-link view URL.
+// Payload: { dataBase64, mimeType, filename? }
+function _saveDesignImage(p) {
+  try {
+    var b64 = String(p.dataBase64 || "");
+    if (!b64) return _json({ ok: false, error: "no image data" });
+    var mime = String(p.mimeType || "image/jpeg");
+    var name = String(p.filename || "design-" + Date.now() + ".jpg");
+    var bytes = Utilities.base64Decode(b64);
+    var blob = Utilities.newBlob(bytes, mime, name);
+    var file = _designImageFolder().createFile(blob);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    var id = file.getId();
+    return _json({ ok: true, id: id, url: "https://drive.google.com/uc?id=" + id });
+  } catch (err) {
+    return _json({ ok: false, error: String(err) });
+  }
+}
+
+var _DESIGN_PROMPT =
+  "You are reading a power-loom design / loom-setup sheet for a cotton weaving unit. " +
+  "The photo may be a handwritten or printed sheet, often in Tamil and English mixed. " +
+  "Extract the construction details into a single JSON object. Do NOT invent values: " +
+  "if a field is not clearly visible, return an empty string for it (or omit warp/weft bands you cannot read). " +
+  "Return ONLY the JSON object, no markdown, no commentary.\n\n" +
+  "JSON shape (all fields optional, use the exact keys):\n" +
+  "{\n" +
+  '  "designNo": string, "designName": string, "sourceFirm": string, "weaveType": string,\n' +
+  '  "reed": string, "reedOrder": string, "pickPPI": string, "warpCount": string, "weftCount": string,\n' +
+  '  "warpWidthIn": string, "clothWidthIn": string, "totalEnds": number, "composition": string,\n' +
+  '  "constructionRaw": string, "repeatEnds": number, "noOfRepeat": number, "extraEnds": number,\n' +
+  '  "totalShafts": number, "totalPicks": number,\n' +
+  '  "warp": [ { "count": string, "colour": string, "layer": string, "ends": number, "extra": number } ],\n' +
+  '  "weft": [ { "count": string, "colour": string, "picks": number, "extra": number } ],\n' +
+  '  "rawText": string,\n' +
+  '  "confidence": number,\n' +
+  '  "lowConfidenceFields": [ string ]\n' +
+  "}\n\n" +
+  "Notes: reed may contain fractions like 65 1/2 — keep it as text. Keep colour names as written. " +
+  "ends/picks/extra are whole numbers per band. confidence is 0..1 overall. " +
+  "lowConfidenceFields lists field names you are unsure about. " +
+  "rawText is your best transcription of the whole sheet.";
+
+// Run Gemini over one or more captured photos and return a draft DesignPayload.
+// Payload: { images: [ { dataBase64, mimeType } ], hint? }
+function _extractDesign(p) {
+  if (!GEMINI_API_KEY) return _json({ ok: false, error: "GEMINI_API_KEY not set" });
+  var images = Array.isArray(p.images) ? p.images : [];
+  if (images.length === 0) return _json({ ok: false, error: "no images" });
+
+  var parts = [{ text: _DESIGN_PROMPT + (p.hint ? "\n\nOperator hint: " + String(p.hint) : "") }];
+  for (var i = 0; i < images.length; i++) {
+    var img = images[i] || {};
+    if (!img.dataBase64) continue;
+    parts.push({
+      inline_data: { mime_type: String(img.mimeType || "image/jpeg"), data: String(img.dataBase64) },
+    });
+  }
+
+  var body = {
+    contents: [{ role: "user", parts: parts }],
+    generationConfig: { temperature: 0, response_mime_type: "application/json" },
+  };
+
+  try {
+    var url = "https://generativelanguage.googleapis.com/v1beta/models/" + GEMINI_MODEL +
+      ":generateContent?key=" + encodeURIComponent(GEMINI_API_KEY);
+    var resp = UrlFetchApp.fetch(url, {
+      method: "post",
+      contentType: "application/json",
+      payload: JSON.stringify(body),
+      muteHttpExceptions: true,
+    });
+    var code = resp.getResponseCode();
+    if (code < 200 || code >= 300) {
+      return _json({ ok: false, error: "gemini http " + code, detail: resp.getContentText().slice(0, 400) });
+    }
+    var data = JSON.parse(resp.getContentText());
+    var text = "";
+    try { text = data.candidates[0].content.parts[0].text || ""; } catch (e2) { text = ""; }
+    if (!text) return _json({ ok: false, error: "empty gemini response" });
+
+    var draft;
+    try { draft = JSON.parse(text); }
+    catch (e3) {
+      var m = text.match(/\{[\s\S]*\}/);
+      if (!m) return _json({ ok: false, error: "gemini did not return json" });
+      draft = JSON.parse(m[0]);
+    }
+    return _json({ ok: true, draft: draft });
   } catch (err) {
     return _json({ ok: false, error: String(err) });
   }

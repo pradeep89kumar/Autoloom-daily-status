@@ -11,6 +11,7 @@ import {
   ArrowLeft,
   CheckCircle,
   Warning,
+  Plus,
 } from "@phosphor-icons/react";
 import {
   fetchDesigns,
@@ -134,6 +135,21 @@ export function DesignsList() {
             </ul>
           )}
         </>
+      )}
+
+      {!loading && (
+        <div
+          className="fixed inset-x-0 z-30 max-w-md mx-auto px-4 flex justify-end pointer-events-none"
+          style={{ bottom: "calc(4.5rem + env(safe-area-inset-bottom))" }}
+        >
+          <button
+            onClick={() => navigate("/supervisor/designs/new")}
+            className="pointer-events-auto inline-flex items-center gap-1.5 h-11 px-4 rounded-full bg-[var(--color-brand-primary)] text-white text-[14px] font-semibold shadow-lg active:scale-95 transition-transform"
+          >
+            <Plus className="w-4 h-4" weight="bold" />
+            Add design
+          </button>
+        </div>
       )}
     </div>
   );
@@ -561,7 +577,7 @@ function colourHex(name: string): string {
   return `hsl(${h % 360} 45% 60%)`;
 }
 
-function StripePreview({
+export function StripePreview({
   bands,
   qtyKey,
   orientation,
@@ -597,7 +613,7 @@ function StripePreview({
   );
 }
 
-function ColourLegend({ names }: { names: string[] }) {
+export function ColourLegend({ names }: { names: string[] }) {
   const uniq = Array.from(new Set(names.map((n) => (n || "").trim()).filter(Boolean)));
   if (uniq.length === 0) return null;
   return (
@@ -615,9 +631,9 @@ function ColourLegend({ names }: { names: string[] }) {
   );
 }
 
-type Check = { ok: boolean; label: string };
+export type Check = { ok: boolean; label: string };
 
-function buildChecks(d: DesignRecord, warp: DesignWarpBand[], weft: DesignWeftBand[]): Check[] {
+export function buildChecks(d: DesignRecord, warp: DesignWarpBand[], weft: DesignWeftBand[]): Check[] {
   const out: Check[] = [];
   const warpSum = warp.reduce((s, b) => s + (Number(b.ends) || 0), 0);
   const totalEnds = Number(d.totalEnds) || 0;

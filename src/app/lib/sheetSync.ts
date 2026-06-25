@@ -499,6 +499,109 @@ export async function submitDesign(p: DesignPayload): Promise<{ ok: boolean }> {
   return submitToSheet(p);
 }
 
+/* ------------------------------ design capture (photo + assisted extract) ------------------------------ */
+
+// Unlike submitToSheet (no-cors, opaque), image upload and extraction need the
+// response body back. Apps Script answers a "simple" cross-origin POST without a
+// preflight when the content type is text/plain, so we keep that header and read
+// the JSON. Token still travels in the body via withTokenBody.
+async function postReadable<T>(p: object): Promise<T | null> {
+  if (!ENDPOINT) {
+    console.log(`[sheetSync] no VITE_SHEET_WEBHOOK_URL set — postReadable:`, p);
+    return null;
+  }
+  try {
+    const res = await fetch(ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify(withTokenBody(p)),
+    });
+    return (await res.json()) as T;
+  } catch (e) {
+    console.warn("[sheetSync] postReadable failed", e);
+    return null;
+  }
+}
+
+// Downscale + re-encode a captured photo so uploads and Gemini calls stay small.
+// Returns base64 (no data: prefix) and the mime type actually used.
+async function imageToBase64(file: File, maxEdge = 1600, quality = 0.8): Promise<{ data: string; mimeType: string }> {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result || ""));
+    fr.onerror = () => reject(fr.error);
+    fr.readAsDataURL(file);
+  });
+
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error("decode failed"));
+      el.src = dataUrl;
+    });
+    const scale = Math.min(1, maxEdge / Math.max(img.width, img.height || 1));
+    const w = Math.max(1, Math.round(img.width * scale));
+    const h = Math.max(1, Math.round(img.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      ctx.drawImage(img, 0, 0, w, h);
+      const out = canvas.toDataURL("image/jpeg", quality);
+      const comma = out.indexOf(",");
+      if (comma > -1) return { data: out.slice(comma + 1), mimeType: "image/jpeg" };
+    }
+  } catch (e) {
+    console.warn("[sheetSync] image compress failed, sending original", e);
+  }
+
+  // Fallback: original bytes.
+  const comma = dataUrl.indexOf(",");
+  return { data: comma > -1 ? dataUrl.slice(comma + 1) : dataUrl, mimeType: file.type || "image/jpeg" };
+}
+
+// Store a captured photo in Drive; returns a public-by-link view URL, or null.
+export async function uploadDesignImage(file: File): Promise<string | null> {
+  const { data, mimeType } = await imageToBase64(file);
+  const r = await postReadable<{ ok: boolean; url?: string }>({
+    kind: "design-image",
+    dataBase64: data,
+    mimeType,
+    filename: file.name || `design-${Date.now()}.jpg`,
+  });
+  return r?.ok && r.url ? r.url : null;
+}
+
+// What Gemini returns: a draft design plus capture-quality hints. All editable.
+export interface ExtractedDesign extends Partial<DesignPayload> {
+  confidence?: number;
+  lowConfidenceFields?: string[];
+  rawText?: string;
+}
+
+// Run assisted extraction over one or more captured photos. Values are a DRAFT —
+// the supervisor must review and correct them before saving.
+export async function extractDesign(files: File[], hint?: string): Promise<ExtractedDesign | null> {
+  const images = await Promise.all(
+    files.map(async (f) => {
+      const { data, mimeType } = await imageToBase64(f);
+      return { dataBase64: data, mimeType };
+    }),
+  );
+  const r = await postReadable<{ ok: boolean; draft?: ExtractedDesign; error?: string }>({
+    kind: "design-extract",
+    images,
+    hint: hint || "",
+  });
+  if (!r?.ok || !r.draft) {
+    if (r?.error) console.warn("[sheetSync] extractDesign error", r.error);
+    return null;
+  }
+  return r.draft;
+}
+
 // List captured designs (newest first). Parent rows only — no warp/weft bands.
 export async function fetchDesigns(): Promise<DesignRecord[]> {
   if (!ENDPOINT) return [];
