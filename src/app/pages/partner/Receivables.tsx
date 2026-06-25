@@ -370,7 +370,7 @@ export function PartnerReceivables() {
                         <p className="mt-0.5 text-[14px] text-[var(--color-text-secondary)] tabular-nums">
                           Inv {fmtDate(r.invoiceDate)}   ·   Due {fmtDate(r.dueDate)}
                           {pendingState && invAge !== null && invAge >= 0 && (
-                            <span className="text-[var(--color-text-tertiary)]">   ·   {invAge}d from invoice</span>
+                            <span className="text-[var(--color-text-tertiary)]">   ·   {invAge}d</span>
                           )}
                         </p>
                         <div className="mt-1.5 flex items-baseline justify-between gap-2">
