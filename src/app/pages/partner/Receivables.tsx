@@ -49,6 +49,27 @@ function ageDays(s: string): number | null {
   return Math.round((today.getTime() - d.getTime()) / 86400000);
 }
 
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
+// Aging heat for the days-since-invoice chip:
+//   1–15d  dark green → light green
+//   16–30d yellow → orange
+//   >30d   no tint (the Overdue badge already signals urgency)
+function ageColor(days: number): string | null {
+  if (days <= 0) return null;
+  if (days <= 15) {
+    const t = Math.min(1, Math.max(0, (days - 1) / 14));
+    return `hsl(${lerp(140, 100, t)} ${lerp(65, 55, t)}% ${lerp(30, 45, t)}%)`;
+  }
+  if (days <= 30) {
+    const t = Math.min(1, Math.max(0, (days - 16) / 14));
+    return `hsl(${lerp(50, 28, t)} 90% 48%)`;
+  }
+  return null;
+}
+
 type StatusKind = "unbilled" | "paid" | "partial" | "pending";
 
 function statusKind(r: ReceivableRow): StatusKind {
@@ -346,6 +367,8 @@ export function PartnerReceivables() {
                     const badge = statusBadge(kind, od);
                     const invAge = ageDays(r.invoiceDate);
                     const pendingState = kind === "pending" || kind === "partial";
+                    const ageTint =
+                      pendingState && invAge !== null && invAge >= 0 ? ageColor(invAge) : null;
                     return (
                       <li
                         key={`${r.paaguId}||${r.invoiceNumber}||${idx}`}
@@ -370,7 +393,12 @@ export function PartnerReceivables() {
                         <p className="mt-0.5 text-[14px] text-[var(--color-text-secondary)] tabular-nums">
                           Inv {fmtDate(r.invoiceDate)}   ·   Due {fmtDate(r.dueDate)}
                           {pendingState && invAge !== null && invAge >= 0 && (
-                            <span className="text-[var(--color-text-tertiary)]">   ·   {invAge}d</span>
+                            <span
+                              className={ageTint ? "font-semibold" : "text-[var(--color-text-tertiary)]"}
+                              style={ageTint ? { color: ageTint } : undefined}
+                            >
+                              {"   ·   "}{invAge}d
+                            </span>
                           )}
                         </p>
                         <div className="mt-1.5 flex items-baseline justify-between gap-2">
