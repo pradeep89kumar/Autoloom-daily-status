@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import {
   Camera,
+  UploadSimple,
   Sparkle,
   Plus,
   Trash,
@@ -77,7 +78,8 @@ function s(v: unknown): string {
 
 export function DesignCapture() {
   const navigate = useNavigate();
-  const fileRef = useRef<HTMLInputElement | null>(null);
+  const cameraRef = useRef<HTMLInputElement | null>(null);
+  const galleryRef = useRef<HTMLInputElement | null>(null);
 
   const [files, setFiles] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
@@ -313,8 +315,10 @@ export function DesignCapture() {
           </div>
         )}
 
+        {/* Camera forces the rear camera; the gallery input (no capture) lets the
+            operator pick an image already on the phone, e.g. one received on WhatsApp. */}
         <input
-          ref={fileRef}
+          ref={cameraRef}
           type="file"
           accept="image/*"
           capture="environment"
@@ -322,20 +326,32 @@ export function DesignCapture() {
           onChange={onPick}
           className="hidden"
         />
+        <input
+          ref={galleryRef}
+          type="file"
+          accept="image/*"
+          multiple
+          onChange={onPick}
+          className="hidden"
+        />
         <div className="flex gap-2">
-          <Button variant="outline" className="flex-1" onClick={() => fileRef.current?.click()}>
+          <Button variant="outline" className="flex-1" onClick={() => cameraRef.current?.click()}>
             <Camera className="w-4 h-4" weight="bold" />
-            {previews.length ? "Add photo" : "Take / choose photo"}
+            {previews.length ? "Camera" : "Take photo"}
           </Button>
-          <Button className="flex-1" onClick={onExtract} disabled={files.length === 0 || extracting}>
-            {extracting ? (
-              <CircleNotch className="w-4 h-4 animate-spin" weight="bold" />
-            ) : (
-              <Sparkle className="w-4 h-4" weight="bold" />
-            )}
-            {extracting ? "Reading…" : "Extract details"}
+          <Button variant="outline" className="flex-1" onClick={() => galleryRef.current?.click()}>
+            <UploadSimple className="w-4 h-4" weight="bold" />
+            Upload file
           </Button>
         </div>
+        <Button className="w-full mt-2" onClick={onExtract} disabled={files.length === 0 || extracting}>
+          {extracting ? (
+            <CircleNotch className="w-4 h-4 animate-spin" weight="bold" />
+          ) : (
+            <Sparkle className="w-4 h-4" weight="bold" />
+          )}
+          {extracting ? "Reading…" : "Extract details"}
+        </Button>
 
         {extractTried && !extracting && (
           <p className="mt-2 text-[12px] text-[var(--color-text-tertiary)] leading-relaxed">
