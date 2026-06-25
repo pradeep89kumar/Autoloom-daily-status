@@ -9,6 +9,7 @@ import { PendingList } from "./pages/supervisor/PendingList";
 import { NewLoading } from "./pages/supervisor/NewLoading";
 import { Logs } from "./pages/supervisor/Logs";
 import { BeamRegister } from "./pages/supervisor/BeamRegister";
+import { DesignsList, DesignDetail } from "./pages/supervisor/Designs";
 import { PinGate } from "./pages/partner/PinGate";
 import { PartnerShell } from "./pages/partner/PartnerShell";
 import { PartnerDay } from "./pages/partner/Day";
@@ -37,6 +38,8 @@ export const router = createBrowserRouter([
       { path: "pending", Component: PendingList },
       { path: "new-loading", Component: NewLoading },
       { path: "beams", Component: BeamRegister },
+      { path: "designs", Component: DesignsList },
+      { path: "designs/:designId", Component: DesignDetail },
       { path: "logs", Component: Logs },
     ],
   },

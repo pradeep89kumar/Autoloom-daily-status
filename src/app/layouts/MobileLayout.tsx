@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate, useLocation } from "react-router";
-import { ArrowLeft, House, SquaresFour, Cylinder, type Icon } from "@phosphor-icons/react";
+import { ArrowLeft, House, SquaresFour, Cylinder, Scroll, type Icon } from "@phosphor-icons/react";
 import { ToastHost } from "../components/Toast";
 
 export function MobileLayout() {
@@ -7,9 +7,11 @@ export function MobileLayout() {
   const location = useLocation();
   const isHome = location.pathname === "/supervisor";
   const isBeams = location.pathname.includes("/supervisor/beams");
+  const isDesignsList = location.pathname === "/supervisor/designs";
   // Top-level destinations show the bottom tab bar; deep task pages (entry,
-  // pending, new-loading, logs) stay focused with a back/home header instead.
-  const isTopLevel = isHome || isBeams;
+  // pending, new-loading, logs, a single design) stay focused with a back/home
+  // header instead.
+  const isTopLevel = isHome || isBeams || isDesignsList;
 
   let title = "";
   if (isHome) title = "Looms";
@@ -17,6 +19,8 @@ export function MobileLayout() {
   else if (location.pathname.includes("/supervisor/pending")) title = "Pending entries";
   else if (location.pathname.includes("/supervisor/new-loading")) title = "New loading";
   else if (location.pathname.includes("/supervisor/beams")) title = "Beam register";
+  else if (location.pathname.includes("/supervisor/designs/")) title = "Loom setup";
+  else if (location.pathname.includes("/supervisor/designs")) title = "Designs";
   else if (location.pathname.includes("/supervisor/logs")) title = "Past logs";;
 
   return (
@@ -46,11 +50,12 @@ export function MobileLayout() {
 
       {isTopLevel && (
         <nav
-          className="bg-white border-t border-[var(--color-border-hairline)] grid grid-cols-2 shrink-0"
+          className="bg-white border-t border-[var(--color-border-hairline)] grid grid-cols-3 shrink-0"
           style={{ paddingBottom: "env(safe-area-inset-bottom)", height: "calc(4rem + env(safe-area-inset-bottom))" }}
         >
           <TabLink to="/supervisor" label="Looms" Icon={SquaresFour} end />
           <TabLink to="/supervisor/beams" label="Beams" Icon={Cylinder} />
+          <TabLink to="/supervisor/designs" label="Designs" Icon={Scroll} />
         </nav>
       )}
 
