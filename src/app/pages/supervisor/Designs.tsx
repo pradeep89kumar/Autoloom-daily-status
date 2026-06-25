@@ -9,8 +9,16 @@ import {
   CaretRight,
   ImageSquare,
   ArrowLeft,
+  CheckCircle,
+  Warning,
 } from "@phosphor-icons/react";
-import { fetchDesigns, fetchDesign, type DesignRecord } from "../../lib/sheetSync";
+import {
+  fetchDesigns,
+  fetchDesign,
+  type DesignRecord,
+  type DesignWarpBand,
+  type DesignWeftBand,
+} from "../../lib/sheetSync";
 
 /* ------------------------------ list ------------------------------ */
 
@@ -195,6 +203,28 @@ export function DesignDetail() {
         </div>
       </div>
 
+      {/* pattern preview */}
+      {(warp.length > 0 || weft.length > 0) && (
+        <Section title="Pattern preview">
+          {warp.length > 0 && (
+            <div className="mb-3">
+              <div className="text-[11px] text-[var(--color-text-tertiary)] mb-1.5">Warp · across the width</div>
+              <StripePreview bands={warp} qtyKey="ends" orientation="vertical" />
+            </div>
+          )}
+          {weft.length > 0 && (
+            <div>
+              <div className="text-[11px] text-[var(--color-text-tertiary)] mb-1.5">Weft · along the length</div>
+              <StripePreview bands={weft} qtyKey="picks" orientation="horizontal" />
+            </div>
+          )}
+          <ColourLegend names={[...warp.map((b) => b.colour), ...weft.map((b) => b.colour)]} />
+          <p className="mt-2 text-[11px] text-[var(--color-text-tertiary)] leading-relaxed">
+            Indicative only. Colours are approximated from the captured names for a visual check, not exact shades.
+          </p>
+        </Section>
+      )}
+
       {/* construction summary */}
       <Section title="Construction">
         <StatGrid
@@ -238,6 +268,9 @@ export function DesignDetail() {
           </div>
         ) : null}
       </Section>
+
+      {/* consistency checks */}
+      <ConsistencyChecks d={d} warp={warp} weft={weft} />
 
       {/* weft */}
       <Section title={`Weft${weft.length ? ` · ${weft.length} ${weft.length === 1 ? "band" : "bands"}` : ""}`}>
@@ -497,4 +530,164 @@ function splitRefs(s: string): string[] {
     .split(/[\s,]+/)
     .map((x) => x.trim())
     .filter((x) => /^https?:\/\//i.test(x));
+}
+
+/* ------------------------------ pattern preview + checks ------------------------------ */
+
+// Common loom colour names → an approximate swatch. Unknown names get a stable
+// generated colour so distinct names still read as distinct; the legend always
+// shows the captured name beside the swatch, so the name remains authoritative.
+const COLOUR_HEX: Record<string, string> = {
+  white: "#f4f4f3", cream: "#f3ecd9", "off white": "#ece5d4", beige: "#d9c8a9",
+  black: "#1c1c1c", grey: "#8a8a8a", gray: "#8a8a8a", "dark grey": "#555555", silver: "#c0c0c0",
+  red: "#c0392b", maroon: "#7b241c", wine: "#5e2129", rani: "#d6336c", pink: "#e8a0bf", "rani pink": "#d6336c",
+  green: "#2e7d32", "dark green": "#1b5e20", "parrot green": "#7cb342", olive: "#808000", mehendi: "#8a9a30",
+  blue: "#1565c0", navy: "#1a237e", "navy blue": "#1a237e", "sky blue": "#4fc3f7", firozi: "#17a2b8", turquoise: "#1abc9c", "t blue": "#1565c0",
+  yellow: "#f4c20d", gold: "#d4af37", golden: "#d4af37", mustard: "#d9a404", lemon: "#e6e64d",
+  orange: "#e67e22", brown: "#6d4c41", coffee: "#4e342e", rust: "#a0522d", chocolate: "#3e2723",
+  purple: "#7b1fa2", violet: "#8e44ad", magenta: "#c2185b",
+  khaki: "#b5a642", sandal: "#d2b48c", copper: "#b87333",
+};
+
+function colourHex(name: string): string {
+  const k = String(name || "").trim().toLowerCase();
+  if (!k) return "#d4d4d4";
+  if (COLOUR_HEX[k]) return COLOUR_HEX[k];
+  for (const key of Object.keys(COLOUR_HEX)) {
+    if (k.includes(key)) return COLOUR_HEX[key];
+  }
+  let h = 0;
+  for (let i = 0; i < k.length; i++) h = (h * 31 + k.charCodeAt(i)) >>> 0;
+  return `hsl(${h % 360} 45% 60%)`;
+}
+
+function StripePreview({
+  bands,
+  qtyKey,
+  orientation,
+}: {
+  bands: (DesignWarpBand | DesignWeftBand)[];
+  qtyKey: "ends" | "picks";
+  orientation: "vertical" | "horizontal";
+}) {
+  const usable = bands.filter((b) => (Number((b as Record<string, unknown>)[qtyKey]) || 0) > 0);
+  if (usable.length === 0) {
+    return (
+      <p className="text-[12px] text-[var(--color-text-tertiary)]">
+        No {qtyKey === "ends" ? "ends" : "picks"} captured — preview unavailable.
+      </p>
+    );
+  }
+  const isV = orientation === "vertical";
+  return (
+    <div
+      className={`flex ${isV ? "flex-row h-16" : "flex-col h-12"} w-full overflow-hidden rounded-lg border border-[var(--color-border-hairline)]`}
+    >
+      {usable.map((b, i) => {
+        const qty = Number((b as Record<string, unknown>)[qtyKey]) || 0;
+        return (
+          <div
+            key={i}
+            style={{ flexGrow: qty, flexBasis: 0, backgroundColor: colourHex(b.colour) }}
+            title={`${b.colour || "—"} · ${qty}`}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function ColourLegend({ names }: { names: string[] }) {
+  const uniq = Array.from(new Set(names.map((n) => (n || "").trim()).filter(Boolean)));
+  if (uniq.length === 0) return null;
+  return (
+    <div className="mt-2.5 flex flex-wrap gap-x-3 gap-y-1.5">
+      {uniq.map((n) => (
+        <span key={n} className="inline-flex items-center gap-1.5 text-[12px] text-[var(--color-text-secondary)]">
+          <span
+            className="w-3 h-3 rounded-sm border border-[var(--color-border-hairline)]"
+            style={{ backgroundColor: colourHex(n) }}
+          />
+          {n}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+type Check = { ok: boolean; label: string };
+
+function buildChecks(d: DesignRecord, warp: DesignWarpBand[], weft: DesignWeftBand[]): Check[] {
+  const out: Check[] = [];
+  const warpSum = warp.reduce((s, b) => s + (Number(b.ends) || 0), 0);
+  const totalEnds = Number(d.totalEnds) || 0;
+  const repeatEnds = Number(d.repeatEnds) || 0;
+  const noOfRepeat = Number(d.noOfRepeat) || 0;
+  const extraEnds = Number(d.extraEnds) || 0;
+
+  // Warp band ends vs total ends (or one repeat) — pure arithmetic, no unit ambiguity.
+  if (warp.length > 0 && warpSum > 0) {
+    if (totalEnds > 0 && warpSum === totalEnds) {
+      out.push({ ok: true, label: `Warp bands add up to the total ends (${totalEnds}).` });
+    } else if (repeatEnds > 0 && warpSum === repeatEnds) {
+      out.push({ ok: true, label: `Warp bands add up to one repeat (${repeatEnds} ends).` });
+    } else if (totalEnds > 0) {
+      out.push({ ok: false, label: `Warp bands add up to ${warpSum}, but total ends says ${totalEnds}.` });
+    }
+    const missing = warp.filter((b) => !(Number(b.ends) > 0)).length;
+    if (missing > 0) {
+      out.push({ ok: false, label: `${missing} warp band${missing === 1 ? "" : "s"} ${missing === 1 ? "has" : "have"} no ends value.` });
+    }
+  }
+
+  // Repeat identity: repeat ends × repeats (+ extra) should equal total ends.
+  if (repeatEnds > 0 && noOfRepeat > 0 && totalEnds > 0) {
+    const expected = repeatEnds * noOfRepeat + extraEnds;
+    const sum = `${repeatEnds} × ${noOfRepeat}${extraEnds ? ` + ${extraEnds}` : ""}`;
+    out.push(
+      expected === totalEnds
+        ? { ok: true, label: `Repeat math checks out: ${sum} = ${totalEnds}.` }
+        : { ok: false, label: `Repeat math: ${sum} = ${expected}, but total ends says ${totalEnds}.` },
+    );
+  }
+
+  // Weft completeness.
+  if (weft.length > 0) {
+    const missingW = weft.filter((b) => !(Number(b.picks) > 0)).length;
+    if (missingW > 0) {
+      out.push({ ok: false, label: `${missingW} weft band${missingW === 1 ? "" : "s"} ${missingW === 1 ? "has" : "have"} no picks value.` });
+    }
+  }
+
+  return out;
+}
+
+function ConsistencyChecks({
+  d,
+  warp,
+  weft,
+}: {
+  d: DesignRecord;
+  warp: DesignWarpBand[];
+  weft: DesignWeftBand[];
+}) {
+  const checks = buildChecks(d, warp, weft);
+  if (checks.length === 0) return null;
+  const allOk = checks.every((c) => c.ok);
+  return (
+    <Section title={`Consistency checks${allOk ? "" : " · review"}`}>
+      <ul className="space-y-2">
+        {checks.map((c, i) => (
+          <li key={i} className="flex items-start gap-2">
+            {c.ok ? (
+              <CheckCircle className="w-4 h-4 mt-0.5 shrink-0 text-green-600" weight="fill" />
+            ) : (
+              <Warning className="w-4 h-4 mt-0.5 shrink-0 text-amber-600" weight="fill" />
+            )}
+            <span className="text-[13px] text-[var(--color-text-primary)] leading-snug">{c.label}</span>
+          </li>
+        ))}
+      </ul>
+    </Section>
+  );
 }
