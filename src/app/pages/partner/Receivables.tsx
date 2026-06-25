@@ -344,6 +344,8 @@ export function PartnerReceivables() {
                     const kind = statusKind(r);
                     const od = ageDays(r.dueDate);
                     const badge = statusBadge(kind, od);
+                    const invAge = ageDays(r.invoiceDate);
+                    const pendingState = kind === "pending" || kind === "partial";
                     return (
                       <li
                         key={`${r.paaguId}||${r.invoiceNumber}||${idx}`}
@@ -367,6 +369,9 @@ export function PartnerReceivables() {
                         </p>
                         <p className="mt-0.5 text-[14px] text-[var(--color-text-secondary)] tabular-nums">
                           Inv {fmtDate(r.invoiceDate)}   ·   Due {fmtDate(r.dueDate)}
+                          {pendingState && invAge !== null && invAge >= 0 && (
+                            <span className="text-[var(--color-text-tertiary)]">   ·   {invAge}d from invoice</span>
+                          )}
                         </p>
                         <div className="mt-1.5 flex items-baseline justify-between gap-2">
                           {kind === "partial" && (r.receipts || 0) > 0 ? (
