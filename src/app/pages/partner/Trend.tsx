@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { TrendUp, TrendDown, ArrowRight, CaretDown } from "@phosphor-icons/react";
+import { useNavigate } from "react-router";
+import { TrendUp, TrendDown, ArrowRight, CaretDown, FilePdf } from "@phosphor-icons/react";
 import {
   LineChart,
   Line,
@@ -125,6 +126,7 @@ function tintForMagnitude(value: number | null, max: number): string {
 }
 
 export function PartnerTrend() {
+  const navigate = useNavigate();
   const [metric, setMetric] = useState<Metric>("efficiency");
   const [rows, setRows] = useState<MasterRangeRow[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -323,6 +325,17 @@ export function PartnerTrend() {
 
   return (
     <div className="px-4 py-4">
+      {/* Export the month's figures as a properly formatted PDF report */}
+      <div className="mb-4 flex justify-end">
+        <button
+          onClick={() => navigate("/partner/trend/report")}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-border-hairline)] bg-white px-3 py-2 text-[13px] font-medium text-[var(--color-text-primary)] active:bg-black/[0.02]"
+        >
+          <FilePdf className="h-4 w-4" weight="bold" />
+          Export PDF
+        </button>
+      </div>
+
       {/* Monthly target tracker — verdict-first */}
       {targetStats ? (
         <MonthTargetCard stats={targetStats} monthStart={monthStart} momentum={momentum} loomStatus={loomStatus} />
