@@ -24,6 +24,24 @@ function longDate(d: Date): string {
   return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 
+function monthTitle(d: Date): string {
+  return d.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+}
+
+// Newest-first list of selectable months (current month + previous ones).
+// The current month is tagged "(so far)" since it is still in progress.
+function buildMonthOptions(count: number): { key: string; label: string }[] {
+  const out: { key: string; label: string }[] = [];
+  const now = new Date();
+  for (let i = 0; i < count; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const key = `${d.getFullYear()}-${d.getMonth() + 1}`;
+    const label = monthTitle(d) + (i === 0 ? " (so far)" : "");
+    out.push({ key, label });
+  }
+  return out;
+}
+
 function shortDay(iso: string): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
@@ -64,15 +82,26 @@ export function PartnerTrendReport() {
   const [rows, setRows] = useState<MasterRangeRow[] | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const monthStart = useMemo(() => {
-    const d = new Date();
-    return new Date(d.getFullYear(), d.getMonth(), 1);
-  }, []);
   const today = useMemo(() => {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
     return d;
   }, []);
+
+  // Month picker — defaults to the PREVIOUS complete month, because the report
+  // is downloaded on the 1st to capture the month that just ended.
+  const monthOptions = useMemo(() => buildMonthOptions(6), []);
+  const [monthKey, setMonthKey] = useState(() => monthOptions[1]?.key ?? monthOptions[0].key);
+
+  const period = useMemo(() => {
+    const [y, m] = monthKey.split("-").map(Number);
+    const start = new Date(y, m - 1, 1);
+    const end = new Date(y, m, 0);                 // last day of the month
+    const periodEnd = end < today ? end : today;   // cap the current month at today
+    const complete = today > end;                  // whole month is in the past
+    return { start, end, periodEnd, complete, daysInMonth: end.getDate() };
+  }, [monthKey, today]);
+
   const generatedAt = useMemo(
     () => new Date().toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }),
     [],
@@ -81,7 +110,7 @@ export function PartnerTrendReport() {
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    fetchMasterRange(ymd(monthStart), ymd(today)).then((r) => {
+    fetchMasterRange(ymd(period.start), ymd(period.periodEnd)).then((r) => {
       if (!alive) return;
       const filtered = r.filter((row) => !(isNewLoom(row.loom) && row.date < NEW_LOOM_START));
       setRows(filtered);
@@ -90,11 +119,11 @@ export function PartnerTrendReport() {
     return () => {
       alive = false;
     };
-  }, [monthStart, today]);
+  }, [period]);
 
   // Month-to-date fleet summary — mirrors the Trend screen's target tracker.
   const summary = useMemo(() => {
-    const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+    const daysInMonth = period.daysInMonth;
     const targetPerDay = MONTHLY_TARGET / daysInMonth;
     let revenue = 0;
     let meters = 0;
@@ -110,6 +139,7 @@ export function PartnerTrendReport() {
     const avgPerDay = daysElapsed > 0 ? revenue / daysElapsed : 0;
     const projected = avgPerDay * daysInMonth;
     const gap = MONTHLY_TARGET - projected;
+    const finalGap = MONTHLY_TARGET - revenue;
     return {
       daysInMonth,
       daysElapsed,
@@ -119,9 +149,10 @@ export function PartnerTrendReport() {
       avgPerDay,
       projected,
       gap,
+      finalGap,
       targetFraction: MONTHLY_TARGET > 0 ? revenue / MONTHLY_TARGET : 0,
     };
-  }, [rows, today]);
+  }, [rows, period]);
 
   // Per-loom month-to-date breakdown.
   const loomStats = useMemo<LoomStat[]>(() => {
@@ -197,18 +228,31 @@ export function PartnerTrendReport() {
           <ArrowLeft className="h-4 w-4" weight="bold" />
           Back
         </button>
-        <button
-          onClick={() => window.print()}
-          disabled={loading}
-          className="inline-flex items-center gap-2 rounded-lg bg-black px-4 py-2 text-[14px] font-semibold text-white disabled:opacity-50"
-        >
-          {loading ? (
-            <CircleNotch className="h-4 w-4 animate-spin" weight="bold" />
-          ) : (
-            <Printer className="h-4 w-4" weight="bold" />
-          )}
-          Save as PDF
-        </button>
+        <div className="flex items-center gap-2">
+          <select
+            value={monthKey}
+            onChange={(e) => setMonthKey(e.target.value)}
+            className="rounded-lg border border-black/15 bg-white px-2.5 py-2 text-[13px] font-medium text-black/80"
+          >
+            {monthOptions.map((o) => (
+              <option key={o.key} value={o.key}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={() => window.print()}
+            disabled={loading}
+            className="inline-flex items-center gap-2 rounded-lg bg-black px-4 py-2 text-[14px] font-semibold text-white disabled:opacity-50"
+          >
+            {loading ? (
+              <CircleNotch className="h-4 w-4 animate-spin" weight="bold" />
+            ) : (
+              <Printer className="h-4 w-4" weight="bold" />
+            )}
+            Save as PDF
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -220,9 +264,12 @@ export function PartnerTrendReport() {
           {/* Header */}
           <header className="mb-5 border-b-2 border-black pb-3">
             <h1 className="text-[22px] font-bold leading-tight">{FIRM_NAME}</h1>
-            <p className="text-[14px] font-semibold text-black/80">Monthly Production Report</p>
+            <p className="text-[14px] font-semibold text-black/80">
+              Monthly Production Report · {monthTitle(period.start)}
+            </p>
             <p className="mt-1 text-[12px] text-black/60">
-              Period: {longDate(monthStart)} — {longDate(today)} · Generated {generatedAt}
+              Period: {longDate(period.start)} — {longDate(period.periodEnd)}
+              {period.complete ? "" : " (in progress)"} · Generated {generatedAt}
             </p>
           </header>
 
@@ -241,11 +288,23 @@ export function PartnerTrendReport() {
                 label="Active days"
                 value={`${summary.daysElapsed} of ${summary.daysInMonth}`}
               />
-              <Kpi label="Pace vs target" value={pct(summary.paceFraction)} />
-              <Kpi label="Projected month-end" value={fmtRupees(summary.projected)} />
+              {!period.complete && (
+                <>
+                  <Kpi label="Pace vs target" value={pct(summary.paceFraction)} />
+                  <Kpi label="Projected month-end" value={fmtRupees(summary.projected)} />
+                </>
+              )}
               <Kpi
-                label={summary.gap > 0 ? "Projected shortfall" : "Projected surplus"}
-                value={fmtRupees(Math.abs(summary.gap))}
+                label={
+                  period.complete
+                    ? summary.finalGap > 0
+                      ? "Shortfall vs target"
+                      : "Surplus vs target"
+                    : summary.gap > 0
+                      ? "Projected shortfall"
+                      : "Projected surplus"
+                }
+                value={fmtRupees(Math.abs(period.complete ? summary.finalGap : summary.gap))}
               />
             </div>
           </section>
