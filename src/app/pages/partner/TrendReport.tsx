@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { ArrowLeft, Printer, CircleNotch } from "@phosphor-icons/react";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+} from "recharts";
 import { fetchMasterRange, type MasterRangeRow } from "../../lib/sheetSync";
 import { LOOM_CATALOG, isNewLoom } from "../../lib/looms";
 import { fmtRupees, fmtMeters } from "../../lib/partnerCopy";
@@ -51,6 +58,21 @@ function shortDay(iso: string): string {
 function pct(frac: number): string {
   if (!isFinite(frac)) return "—";
   return `${Math.round(frac * 100)}%`;
+}
+
+function fmtThousand(n: number): string {
+  if (!isFinite(n)) return "";
+  if (Math.abs(n) >= 100000) return `₹${(n / 100000).toFixed(1)}L`;
+  return `₹${Math.round(n / 1000)}k`;
+}
+
+// Efficiency tint for the heatmap — explicit rgba so it survives print.
+function effTint(frac: number | null): string {
+  if (frac === null) return "rgba(0,0,0,0.05)";
+  if (frac < 0.5) return "rgba(220,38,38,0.22)";
+  if (frac < 0.7) return "rgba(232,163,23,0.30)";
+  if (frac < 0.85) return "rgba(22,163,74,0.22)";
+  return "rgba(22,163,74,0.44)";
 }
 
 interface LoomStat {
@@ -217,6 +239,40 @@ export function PartnerTrendReport() {
     return { meters, revenue };
   }, [loomStats]);
 
+  // Every calendar day in the reported range (for chart x-axis + heatmap columns).
+  const monthDates = useMemo(() => {
+    const out: Date[] = [];
+    const d = new Date(period.start);
+    while (d <= period.periodEnd) {
+      out.push(new Date(d));
+      d.setDate(d.getDate() + 1);
+    }
+    return out;
+  }, [period]);
+
+  // Daily fleet income vs the flat daily target line.
+  const chartData = useMemo(() => {
+    const dailyTarget = MONTHLY_TARGET / period.daysInMonth;
+    return dayStats.map((d) => ({
+      label: String(new Date(d.date).getDate()),
+      income: Math.round(d.revenue),
+      target: Math.round(dailyTarget),
+    }));
+  }, [dayStats, period]);
+
+  // Per-loom × per-day efficiency grid for the heatmap.
+  const heatGrid = useMemo(() => {
+    const m = new Map<string, { meters: number; target: number }>();
+    for (const r of rows || []) {
+      const k = `${r.loom}|${r.date}`;
+      const cur = m.get(k) || { meters: 0, target: 0 };
+      cur.meters += r.meters;
+      cur.target += r.targetMeters;
+      m.set(k, cur);
+    }
+    return m;
+  }, [rows]);
+
   return (
     <div className="min-h-screen bg-white text-black">
       {/* Screen-only action bar */}
@@ -309,6 +365,68 @@ export function PartnerTrendReport() {
             </div>
           </section>
 
+          {/* Income trend chart */}
+          <section className="mb-6">
+            <h2 className="mb-2 text-[13px] font-bold uppercase tracking-wide text-black/70">
+              Income trend
+            </h2>
+            {chartData.length === 0 ? (
+              <p className="text-[12px] text-black/50">No income recorded this month.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <LineChart
+                  width={680}
+                  height={220}
+                  data={chartData}
+                  margin={{ top: 8, right: 16, left: 4, bottom: 0 }}
+                >
+                  <CartesianGrid stroke="#e5e5e5" vertical={false} />
+                  <XAxis
+                    dataKey="label"
+                    tick={{ fontSize: 10, fill: "#666" }}
+                    axisLine={false}
+                    tickLine={false}
+                    interval="preserveStartEnd"
+                  />
+                  <YAxis
+                    tickFormatter={(v: number) => fmtThousand(v)}
+                    tick={{ fontSize: 10, fill: "#666" }}
+                    axisLine={false}
+                    tickLine={false}
+                    width={46}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="target"
+                    stroke="#6B7280"
+                    strokeWidth={1.5}
+                    strokeDasharray="4 4"
+                    dot={false}
+                    isAnimationActive={false}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="income"
+                    stroke="#16A34A"
+                    strokeWidth={2.5}
+                    dot={false}
+                    isAnimationActive={false}
+                  />
+                </LineChart>
+              </div>
+            )}
+            <div className="mt-1 flex items-center gap-4 text-[10px] text-black/55">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="inline-block h-[2.5px] w-4 rounded-full" style={{ backgroundColor: "#16A34A" }} />
+                Income
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="inline-block w-4 border-t-2 border-dashed" style={{ borderColor: "#6B7280" }} />
+                Daily target
+              </span>
+            </div>
+          </section>
+
           {/* Per-loom breakdown */}
           <section className="mb-6">
             <h2 className="mb-2 text-[13px] font-bold uppercase tracking-wide text-black/70">
@@ -348,6 +466,55 @@ export function PartnerTrendReport() {
                 </tr>
               </tfoot>
             </table>
+          </section>
+
+          {/* Performance heatmap */}
+          <section className="mb-6">
+            <h2 className="mb-2 text-[13px] font-bold uppercase tracking-wide text-black/70">
+              Performance heatmap
+            </h2>
+            <div className="overflow-x-auto">
+              <table className="border-separate" style={{ borderSpacing: 2 }}>
+                <thead>
+                  <tr>
+                    <th className="w-7" />
+                    {monthDates.map((d) => (
+                      <th
+                        key={ymd(d)}
+                        className="text-[9px] font-medium text-black/50 tabular-nums"
+                        style={{ width: 14 }}
+                      >
+                        {d.getDate()}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {LOOMS.map((loom) => (
+                    <tr key={loom}>
+                      <td className="pr-1 text-[11px] font-semibold text-black">{loom}</td>
+                      {monthDates.map((d) => {
+                        const cell = heatGrid.get(`${loom}|${ymd(d)}`);
+                        const frac = cell && cell.target > 0 ? cell.meters / cell.target : null;
+                        return (
+                          <td
+                            key={ymd(d)}
+                            title={`${loom} · ${shortDay(ymd(d))} · ${frac === null ? "no data" : pct(frac)}`}
+                            style={{ width: 14, height: 14, borderRadius: 2, backgroundColor: effTint(frac) }}
+                          />
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="mt-2 flex items-center gap-3 text-[10px] text-black/55">
+              <LegendSwatch color={effTint(0.3)} label="<50%" />
+              <LegendSwatch color={effTint(0.6)} label="50–70%" />
+              <LegendSwatch color={effTint(0.78)} label="70–85%" />
+              <LegendSwatch color={effTint(0.95)} label="85%+" />
+            </div>
           </section>
 
           {/* Day-by-day trend */}
@@ -430,5 +597,14 @@ function Td({ children, align = "left" }: { children: React.ReactNode; align?: "
     <td className={`py-1.5 pr-2 tabular-nums ${align === "right" ? "text-right" : "text-left"}`}>
       {children}
     </td>
+  );
+}
+
+function LegendSwatch({ color, label }: { color: string; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span className="inline-block h-3 w-3 rounded-[2px]" style={{ backgroundColor: color }} />
+      {label}
+    </span>
   );
 }
