@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router";
-import { CaretRight, CaretDown, CaretUp, Warning } from "@phosphor-icons/react";
+import { Link, useNavigate } from "react-router";
+import { CaretRight, CaretDown, CaretUp, Warning, FilePdf } from "@phosphor-icons/react";
 import { fetchCashflow, type CashflowData } from "../../lib/sheetSync";
 
 function fmtINR(n: number): string {
@@ -33,6 +33,7 @@ function timeAgo(iso: string): string {
 }
 
 export function PartnerCash() {
+  const navigate = useNavigate();
   const [data, setData] = useState<CashflowData | null>(null);
   const [loading, setLoading] = useState(true);
   const [opExpanded, setOpExpanded] = useState(false);
@@ -67,6 +68,17 @@ export function PartnerCash() {
             As of {formatAsOf(data.asOfDate)} · {timeAgo(data.lastEntryDate)}
           </span>
         )}
+      </div>
+
+      {/* Export the month's cash movements as a properly formatted PDF report */}
+      <div className="mb-3 flex justify-end">
+        <button
+          onClick={() => navigate("/partner/cash/report")}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-border-hairline)] bg-white px-3 py-2 text-[13px] font-medium text-[var(--color-text-primary)] active:bg-black/[0.02]"
+        >
+          <FilePdf className="h-4 w-4" weight="bold" />
+          Export PDF
+        </button>
       </div>
 
       {loading && <CashSkeleton />}

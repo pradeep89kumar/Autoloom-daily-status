@@ -16,6 +16,7 @@ import { PartnerShell } from "./pages/partner/PartnerShell";
 import { PartnerDay } from "./pages/partner/Day";
 import { PartnerCash } from "./pages/partner/Cash";
 import { PartnerCashStatement } from "./pages/partner/CashStatement";
+import { PartnerCashReport } from "./pages/partner/CashReport";
 import { PartnerNewShedExpenses } from "./pages/partner/NewShedExpenses";
 import { PartnerTrend } from "./pages/partner/Trend";
 import { PartnerTrendReport } from "./pages/partner/TrendReport";
@@ -66,6 +67,7 @@ export const router = createBrowserRouter([
         ],
       },
       { path: "cash/statement", Component: PartnerCashStatement },
+      { path: "cash/report", Component: PartnerCashReport },
       { path: "cash/new-shed", Component: PartnerNewShedExpenses },
       { path: "trend/report", Component: PartnerTrendReport },
     ],
