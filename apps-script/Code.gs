@@ -1047,6 +1047,15 @@ function installDailyReportTrigger() {
     .create();
 }
 
+// An advance recorded before invoicing carries a placeholder like
+// "invoice not created" in the invoice-number cell. Treat that as no invoice.
+function _hasRealInvoice(inv) {
+  var s = String(inv || "").trim().toLowerCase();
+  if (!s) return false;
+  if (s.indexOf("not created") >= 0 || s.indexOf("no invoice") >= 0 || s.indexOf("not yet") >= 0) return false;
+  return true;
+}
+
 // Grand total of pending receivables — mirrors the partner Receivables tab:
 // merge rows sharing a party+invoice, then sum the effective pending of each.
 function _totalPendingReceivables() {
@@ -1056,7 +1065,7 @@ function _totalPendingReceivables() {
   for (var i = 0; i < rows.length; i++) {
     var r = rows[i];
     var inv = String(r.invoiceNumber || "").trim();
-    if (!inv) { passthrough.push(r); continue; }
+    if (!_hasRealInvoice(inv)) { passthrough.push(r); continue; }
     var key = String(r.party || "").trim() + "||" + inv;
     if (!byInv[key]) {
       byInv[key] = {
@@ -1076,7 +1085,7 @@ function _totalPendingReceivables() {
   }
   var total = 0;
   for (var k in byInv) total += _effectivePending(byInv[k]);
-  for (var j = 0; j < passthrough.length; j++) total += _effectivePending(passthrough[j]);
+  // Rows without a real invoice (advances / not-yet-billed) are not receivables.
   return total;
 }
 

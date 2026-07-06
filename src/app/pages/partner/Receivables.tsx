@@ -3,7 +3,7 @@ import { CaretDown, CaretUp } from "@phosphor-icons/react";
 import { fetchMasterReceivables, type ReceivableRow } from "../../lib/sheetSync";
 import { fmtRupees } from "../../lib/partnerCopy";
 
-type FilterKey = "all" | "pending" | "overdue" | "partial" | "unbilled";
+type FilterKey = "all" | "pending" | "overdue" | "partial" | "unbilled" | "advance";
 
 // Bill amount is GST-inclusive (5%, mostly uniform). Per CBDT Circular 23/2017,
 // TDS is deducted on the taxable value (pre-GST), not on the GST. So strip GST
@@ -70,11 +70,30 @@ function ageColor(days: number): string | null {
   return null;
 }
 
-type StatusKind = "unbilled" | "paid" | "partial" | "pending";
+type StatusKind = "unbilled" | "advance" | "paid" | "partial" | "pending";
+
+// A real invoice number — not blank and not a placeholder like
+// "invoice not created" used when an advance is received before billing.
+function hasRealInvoice(r: ReceivableRow): boolean {
+  const inv = (r.invoiceNumber || "").trim().toLowerCase();
+  if (!inv) return false;
+  if (inv.includes("not created") || inv.includes("no invoice") || inv.includes("not yet")) {
+    return false;
+  }
+  return true;
+}
+
+// Advance = money received while there is no invoice yet.
+function advanceAmount(r: ReceivableRow): number {
+  return !hasRealInvoice(r) ? (r.receipts || 0) : 0;
+}
 
 function statusKind(r: ReceivableRow): StatusKind {
   const s = (r.paymentStatus || r.status || "").toLowerCase();
-  if (!r.invoiceNumber || s.includes("unbilled")) return "unbilled";
+  if (!hasRealInvoice(r)) {
+    // No invoice yet: an advance if money is in, otherwise simply unbilled.
+    return (r.receipts || 0) > 0 ? "advance" : "unbilled";
+  }
   // Honor explicit "Paid" mark from sheet — settlements with TDS / small
   // debits won't show full receipts, so trust the status label.
   if (s.includes("paid") && !s.includes("partial") && !s.includes("unpaid")) return "paid";
@@ -84,6 +103,8 @@ function statusKind(r: ReceivableRow): StatusKind {
 }
 
 function effectivePending(r: ReceivableRow): number {
+  // Only raised invoices are receivables. Advances / unbilled rows are not.
+  if (!hasRealInvoice(r)) return 0;
   const s = (r.paymentStatus || r.status || "").toLowerCase();
   if (s.includes("paid") && !s.includes("partial") && !s.includes("unpaid")) return 0;
   if (r.invoiceAmount > 0) {
@@ -94,6 +115,7 @@ function effectivePending(r: ReceivableRow): number {
 
 function statusBadge(kind: StatusKind, overdueDays: number | null) {
   if (kind === "unbilled") return { label: "Unbilled", cls: "bg-gray-100 text-gray-700" };
+  if (kind === "advance") return { label: "Advance", cls: "bg-emerald-100 text-emerald-700" };
   if (kind === "paid") return { label: "Paid", cls: "bg-green-100 text-green-700" };
   if (kind === "partial") return { label: "Partial", cls: "bg-amber-100 text-amber-700" };
   if (overdueDays !== null && overdueDays > 0) {
@@ -133,6 +155,7 @@ export function PartnerReceivables() {
       const kind = statusKind(r);
       if (filter === "all") return true;
       if (filter === "unbilled") return kind === "unbilled";
+      if (filter === "advance") return kind === "advance";
       if (filter === "partial") return kind === "partial";
       if (filter === "pending") return kind === "pending" || kind === "partial";
       if (filter === "overdue") {
@@ -150,7 +173,7 @@ export function PartnerReceivables() {
     const byInv = new Map<string, ReceivableRow>();
     const passthrough: ReceivableRow[] = [];
     for (const r of filtered) {
-      const inv = (r.invoiceNumber || "").trim();
+      const inv = hasRealInvoice(r) ? (r.invoiceNumber || "").trim() : "";
       if (!inv) {
         passthrough.push(r);
         continue;
@@ -193,16 +216,17 @@ export function PartnerReceivables() {
   }, [filtered]);
 
   const grouped = useMemo(() => {
-    const map = new Map<string, { party: string; total: number; count: number; overdue: number; rows: ReceivableRow[] }>();
+    const map = new Map<string, { party: string; total: number; advance: number; count: number; overdue: number; rows: ReceivableRow[] }>();
     for (const r of merged) {
       const key = (r.party || "").trim();
       if (!key) continue;
       let g = map.get(key);
       if (!g) {
-        g = { party: key, total: 0, count: 0, overdue: 0, rows: [] };
+        g = { party: key, total: 0, advance: 0, count: 0, overdue: 0, rows: [] };
         map.set(key, g);
       }
       g.total += effectivePending(r);
+      g.advance += advanceAmount(r);
       g.count += 1;
       const kind = statusKind(r);
       const od = ageDays(r.dueDate);
@@ -228,6 +252,11 @@ export function PartnerReceivables() {
     [grouped],
   );
 
+  const grandAdvance = useMemo(
+    () => grouped.reduce((s, g) => s + g.advance, 0),
+    [grouped],
+  );
+
   return (
     <div className="px-4 pt-4 pb-6">
       <div className="mb-3">
@@ -243,6 +272,7 @@ export function PartnerReceivables() {
             { k: "pending", label: "Pending" },
             { k: "overdue", label: "Overdue" },
             { k: "partial", label: "Partial" },
+            { k: "advance", label: "Advance" },
           ] as { k: FilterKey; label: string }[]
         ).map((f) => (
           <button
@@ -270,10 +300,19 @@ export function PartnerReceivables() {
           </>
         ) : (
           <>
-            <p className="text-[22px] font-bold tabular-nums text-[var(--color-text-primary)] mt-0.5">{fmtRupees(grandTotal)}</p>
-            <p className="text-[14px] font-semibold tabular-nums text-[var(--color-text-secondary)] mt-0.5">
-              After TDS {fmtRupees(netAfterTds(grandTotal))}
+            <p className="text-[22px] font-bold tabular-nums text-[var(--color-text-primary)] mt-0.5">
+              {fmtRupees(filter === "advance" ? grandAdvance : grandTotal)}
             </p>
+            {filter !== "advance" && (
+              <p className="text-[14px] font-semibold tabular-nums text-[var(--color-text-secondary)] mt-0.5">
+                After TDS {fmtRupees(netAfterTds(grandTotal))}
+              </p>
+            )}
+            {filter !== "advance" && grandAdvance > 0 && (
+              <p className="text-[14px] font-semibold tabular-nums text-[var(--color-status-green)] mt-0.5">
+                Advance held {fmtRupees(grandAdvance)} · Net {fmtRupees(Math.max(0, grandTotal - grandAdvance))}
+              </p>
+            )}
             <p className="text-[14px] text-[var(--color-text-secondary)] mt-0.5">
               Across {grouped.length} {grouped.length === 1 ? "party" : "parties"} ·{" "}
               {merged.length} {merged.length === 1 ? "invoice" : "invoices"}
@@ -342,10 +381,17 @@ export function PartnerReceivables() {
                         {g.overdue} overdue
                       </span>
                     )}
+                    {g.advance > 0 && (
+                      <span className="text-[12px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+                        Advance {fmtRupees(g.advance)}
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <span className="text-[18px] font-bold tabular-nums text-[var(--color-brand-primary)]">{fmtRupees(g.total)}</span>
+                  <span className={`text-[18px] font-bold tabular-nums ${filter === "advance" ? "text-[var(--color-status-green)]" : "text-[var(--color-brand-primary)]"}`}>
+                    {fmtRupees(filter === "advance" ? g.advance : g.total)}
+                  </span>
                   {isOpen ? (
                     <CaretUp
                       className="w-4 h-4 text-[var(--color-text-secondary)]"
@@ -376,7 +422,9 @@ export function PartnerReceivables() {
                       >
                         <div className="flex items-baseline justify-between gap-2">
                           <p className="text-[16px] font-semibold text-[var(--color-text-primary)] truncate">
-                            {r.invoiceNumber || r.customerName || r.designDetails || "—"}
+                            {hasRealInvoice(r)
+                              ? r.invoiceNumber
+                              : r.customerName || r.designDetails || r.paaguId || "—"}
                           </p>
                           <span
                             className={`text-[13px] font-semibold px-2 py-0.5 rounded-full ${badge.cls}`}
@@ -402,21 +450,39 @@ export function PartnerReceivables() {
                           )}
                         </p>
                         <div className="mt-1.5 flex items-baseline justify-between gap-2">
-                          {kind === "partial" && (r.receipts || 0) > 0 ? (
-                            <span className="text-[14px] font-bold text-[var(--color-status-green)] tabular-nums">
-                              Paid {fmtRupees(r.receipts)} so far
-                            </span>
+                          {kind === "advance" ? (
+                            <>
+                              <span className="text-[14px] text-[var(--color-text-secondary)]">
+                                Advance received
+                              </span>
+                              <div className="flex flex-col items-end">
+                                <span className="text-[18px] font-bold tabular-nums text-[var(--color-status-green)]">
+                                  {fmtRupees(advanceAmount(r))}
+                                </span>
+                                <span className="text-[12px] font-medium tabular-nums text-[var(--color-text-secondary)]">
+                                  Awaiting invoice
+                                </span>
+                              </div>
+                            </>
                           ) : (
-                            <span />
+                            <>
+                              {kind === "partial" && (r.receipts || 0) > 0 ? (
+                                <span className="text-[14px] font-bold text-[var(--color-status-green)] tabular-nums">
+                                  Paid {fmtRupees(r.receipts)} so far
+                                </span>
+                              ) : (
+                                <span />
+                              )}
+                              <div className="flex flex-col items-end">
+                                <span className="text-[18px] font-bold tabular-nums text-[var(--color-text-primary)]">
+                                  {fmtRupees(r.invoiceAmount)}
+                                </span>
+                                <span className="text-[12px] font-medium tabular-nums text-[var(--color-text-secondary)]">
+                                  After TDS {fmtRupees(netAfterTds(r.invoiceAmount))}
+                                </span>
+                              </div>
+                            </>
                           )}
-                          <div className="flex flex-col items-end">
-                            <span className="text-[18px] font-bold tabular-nums text-[var(--color-text-primary)]">
-                              {fmtRupees(r.invoiceAmount)}
-                            </span>
-                            <span className="text-[12px] font-medium tabular-nums text-[var(--color-text-secondary)]">
-                              After TDS {fmtRupees(netAfterTds(r.invoiceAmount))}
-                            </span>
-                          </div>
                         </div>
                       </li>
                     );
