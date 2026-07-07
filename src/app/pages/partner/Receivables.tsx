@@ -171,13 +171,40 @@ export function PartnerReceivables() {
     // Combine rows that share the same invoice number into one logical invoice.
     // Sum invoiceAmount + receipts; keep earliest invoiceDate, latest dueDate / receivedOn.
     const byInv = new Map<string, ReceivableRow>();
+    const byAdvance = new Map<string, ReceivableRow>();
     const passthrough: ReceivableRow[] = [];
     for (const r of filtered) {
-      const inv = hasRealInvoice(r) ? (r.invoiceNumber || "").trim() : "";
-      if (!inv) {
+      if (!hasRealInvoice(r)) {
+        // Advances for the same design (party + order id / customer) collapse
+        // into one entry, mirroring the single invoice raised later. Amounts
+        // are summed (the advance is recorded on one of the design's rows).
+        if ((r.receipts || 0) > 0) {
+          const design = ((r.orderId || "").trim() || (r.customerName || "").trim()).toLowerCase();
+          const advKey = `${(r.party || "").trim()}||adv||${design}`;
+          const prevAdv = byAdvance.get(advKey);
+          if (!prevAdv) {
+            byAdvance.set(advKey, { ...r });
+            continue;
+          }
+          prevAdv.receipts = (prevAdv.receipts || 0) + (r.receipts || 0);
+          prevAdv.pendingBalance = (prevAdv.pendingBalance || 0) + (r.pendingBalance || 0);
+          const aAdv = fromYmd(prevAdv.receivedOn)?.getTime() ?? -Infinity;
+          const bAdv = fromYmd(r.receivedOn)?.getTime() ?? -Infinity;
+          if (bAdv > aAdv && r.receivedOn) prevAdv.receivedOn = r.receivedOn;
+          const prevLm = prevAdv.loadedLoom || prevAdv.loomNumber || "";
+          const rowLm = r.loadedLoom || r.loomNumber || "";
+          if (prevLm && rowLm && !prevLm.includes(rowLm)) {
+            prevAdv.loadedLoom = `${prevLm}, ${rowLm}`;
+          }
+          if (prevAdv.paaguId && r.paaguId && !prevAdv.paaguId.includes(r.paaguId)) {
+            prevAdv.paaguId = `${prevAdv.paaguId}, ${r.paaguId}`;
+          }
+          continue;
+        }
         passthrough.push(r);
         continue;
       }
+      const inv = (r.invoiceNumber || "").trim();
       const key = `${(r.party || "").trim()}||${inv}`;
       const prev = byInv.get(key);
       if (!prev) {
@@ -212,7 +239,7 @@ export function PartnerReceivables() {
         prev.paaguId = `${prev.paaguId}, ${r.paaguId}`;
       }
     }
-    return [...Array.from(byInv.values()), ...passthrough];
+    return [...Array.from(byInv.values()), ...Array.from(byAdvance.values()), ...passthrough];
   }, [filtered]);
 
   const grouped = useMemo(() => {
