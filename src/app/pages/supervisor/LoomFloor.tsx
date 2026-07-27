@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { WarningCircle, Check, Clock, ArrowLeft } from "@phosphor-icons/react";
-import { LOOM_CATALOG, isNewLoom } from "../../lib/looms";
-import { NewPill } from "../../components/NewPill";
+import { LOOM_CATALOG } from "../../lib/looms";
 
 import {
   fetchFullRows,
@@ -263,7 +262,6 @@ export function LoomFloor() {
                 >
                   <span className="inline-flex items-center gap-1">
                     {l.name}
-                    {isNewLoom(l.id) && <NewPill />}
                     {logged && <Check className="w-3.5 h-3.5" weight="bold" />}
                   </span>
                   {logged && (

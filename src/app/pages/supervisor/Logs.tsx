@@ -3,8 +3,7 @@ import { useNavigate } from "react-router";
 import { Lock, PencilSimple } from "@phosphor-icons/react";
 import { fetchFullRows, type FullRow } from "../../lib/sheetSync";
 import { fromYmd, shortDate } from "../../lib/shift";
-import { LOOM_CATALOG, naturalLoomCompare, isNewLoom } from "../../lib/looms";
-import { NewPill } from "../../components/NewPill";
+import { LOOM_CATALOG, naturalLoomCompare } from "../../lib/looms";
 
 type Preset = "today" | "yesterday" | "7d" | "all" | "custom";
 
@@ -150,7 +149,6 @@ export function Logs() {
                       <div className="flex items-baseline gap-2">
                         <span className="font-semibold text-[15px] inline-flex items-baseline gap-1">
                           {r.loomId}
-                          {isNewLoom(r.loomId) && <NewPill />}
                         </span>
                         <span className="text-[13px] text-[var(--color-text-secondary)] truncate">
                           {r.weaver || "—"}

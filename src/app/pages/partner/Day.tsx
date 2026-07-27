@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { CaretLeft, CaretRight, CaretDown, CaretUp } from "@phosphor-icons/react";
 import { fetchMasterDay, type MasterRow } from "../../lib/sheetSync";
-import { isNewLoom } from "../../lib/looms";
-import { NewPill } from "../../components/NewPill";
 import {
   summarizeDay,
   perLoomTotals,
@@ -281,7 +279,6 @@ function LoomRow({
         <div className="shrink-0 min-w-10">
           <div className="text-[18px] font-bold tabular-nums inline-flex items-baseline gap-1">
             {data.loom}
-            {isNewLoom(data.loom) && <NewPill />}
           </div>
         </div>
         <div className="flex-1 min-w-0">

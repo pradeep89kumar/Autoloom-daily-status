@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { Check, CaretDown } from "@phosphor-icons/react";
-import { LOOM_CATALOG, isNewLoom } from "../../lib/looms";
-import { NewPill } from "../../components/NewPill";
+import { LOOM_CATALOG } from "../../lib/looms";
 import { Button } from "../../components/ui/button";
 import { showToast } from "../../components/Toast";
 import {
@@ -251,7 +250,6 @@ export function NewLoading() {
                   >
                     <span className="inline-flex items-center gap-1">
                       {l.name}
-                      {isNewLoom(l.id) && <NewPill />}
                     </span>
                     <span className="text-[10px] font-normal opacity-80 truncate max-w-full">{sub}</span>
                   </button>
