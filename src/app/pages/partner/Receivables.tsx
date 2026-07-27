@@ -88,6 +88,12 @@ function advanceAmount(r: ReceivableRow): number {
   return !hasRealInvoice(r) ? (r.receipts || 0) : 0;
 }
 
+// Canonical party key — case- and whitespace-insensitive, so the same company
+// typed with different capitalisation / spacing in the sheet collapses to one.
+function partyKey(p?: string): string {
+  return (p || "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
 function statusKind(r: ReceivableRow): StatusKind {
   const s = (r.paymentStatus || r.status || "").toLowerCase();
   if (!hasRealInvoice(r)) {
@@ -180,7 +186,7 @@ export function PartnerReceivables() {
         // are summed (the advance is recorded on one of the design's rows).
         if ((r.receipts || 0) > 0) {
           const design = ((r.orderId || "").trim() || (r.customerName || "").trim()).toLowerCase();
-          const advKey = `${(r.party || "").trim()}||adv||${design}`;
+          const advKey = `${partyKey(r.party)}||adv||${design}`;
           const prevAdv = byAdvance.get(advKey);
           if (!prevAdv) {
             byAdvance.set(advKey, { ...r });
@@ -205,7 +211,7 @@ export function PartnerReceivables() {
         continue;
       }
       const inv = (r.invoiceNumber || "").trim();
-      const key = `${(r.party || "").trim()}||${inv}`;
+      const key = `${partyKey(r.party)}||${inv}`;
       const prev = byInv.get(key);
       if (!prev) {
         byInv.set(key, { ...r });
@@ -245,11 +251,11 @@ export function PartnerReceivables() {
   const grouped = useMemo(() => {
     const map = new Map<string, { party: string; total: number; advance: number; count: number; overdue: number; rows: ReceivableRow[] }>();
     for (const r of merged) {
-      const key = (r.party || "").trim();
+      const key = partyKey(r.party);
       if (!key) continue;
       let g = map.get(key);
       if (!g) {
-        g = { party: key, total: 0, advance: 0, count: 0, overdue: 0, rows: [] };
+        g = { party: (r.party || "").trim(), total: 0, advance: 0, count: 0, overdue: 0, rows: [] };
         map.set(key, g);
       }
       g.total += effectivePending(r);
