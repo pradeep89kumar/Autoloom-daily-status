@@ -380,17 +380,27 @@ export interface ReceivableRow {
   party: string;
 }
 
-export async function fetchMasterReceivables(): Promise<ReceivableRow[]> {
-  if (!ENDPOINT) return [];
+export type ReceivablesFetchResult =
+  | { ok: true; rows: ReceivableRow[] }
+  | { ok: false; rows: ReceivableRow[] };
+
+export async function fetchMasterReceivablesResult(): Promise<ReceivablesFetchResult> {
+  if (!ENDPOINT) return { ok: false, rows: [] };
   try {
     const res = await fetch(withToken(`${ENDPOINT}?mode=master-receivables`), { method: "GET" });
+    if (!res.ok) return { ok: false, rows: [] };
     const data = await res.json();
-    if (!data?.ok || !Array.isArray(data.rows)) return [];
-    return data.rows as ReceivableRow[];
+    if (!data?.ok || !Array.isArray(data.rows)) return { ok: false, rows: [] };
+    return { ok: true, rows: data.rows as ReceivableRow[] };
   } catch (e) {
     console.warn("[sheetSync] fetchMasterReceivables failed", e);
-    return [];
+    return { ok: false, rows: [] };
   }
+}
+
+export async function fetchMasterReceivables(): Promise<ReceivableRow[]> {
+  const result = await fetchMasterReceivablesResult();
+  return result.rows;
 }
 
 /* ------------------------------ design master (loom setup) ------------------------------ */

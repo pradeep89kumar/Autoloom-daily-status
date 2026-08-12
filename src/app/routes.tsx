@@ -21,6 +21,7 @@ import { PartnerNewShedExpenses } from "./pages/partner/NewShedExpenses";
 import { PartnerTrend } from "./pages/partner/Trend";
 import { PartnerTrendReport } from "./pages/partner/TrendReport";
 import { PartnerReceivables } from "./pages/partner/Receivables";
+import { PartnerReceivablesReport } from "./pages/partner/ReceivablesReport";
 import { PartnerGuard } from "./pages/partner/PartnerGuard";
 
 export const router = createBrowserRouter([
@@ -70,7 +71,7 @@ export const router = createBrowserRouter([
       { path: "cash/report", Component: PartnerCashReport },
       { path: "cash/new-shed", Component: PartnerNewShedExpenses },
       { path: "trend/report", Component: PartnerTrendReport },
+      { path: "receivables/report", Component: PartnerReceivablesReport },
     ],
   },
 ]);
-

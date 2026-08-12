@@ -1,52 +1,25 @@
 import { useEffect, useMemo, useState } from "react";
-import { CaretDown, CaretUp } from "@phosphor-icons/react";
+import { CaretDown, CaretUp, FilePdf } from "@phosphor-icons/react";
+import { useNavigate } from "react-router";
 import { fetchMasterReceivables, type ReceivableRow } from "../../lib/sheetSync";
 import { fmtRupees } from "../../lib/partnerCopy";
-
-type FilterKey = "all" | "pending" | "overdue" | "partial" | "unbilled" | "advance";
-
-// Bill amount is GST-inclusive (5%, mostly uniform). Per CBDT Circular 23/2017,
-// TDS is deducted on the taxable value (pre-GST), not on the GST. So strip GST
-// first, then apply the 2% 194C company-contractor rate. The cash actually
-// received lands below the bill amount.
-const GST_RATE = 0.05;
-const TDS_RATE = 0.02;
-
-function netAfterTds(amount: number): number {
-  const taxableBase = amount / (1 + GST_RATE);
-  const tds = taxableBase * TDS_RATE;
-  return Math.round(amount - tds);
-}
-
-function fromYmd(s: string): Date | null {
-  if (!s) return null;
-  const [y, m, d] = s.split("-").map(Number);
-  if (!y || !m || !d) return null;
-  return new Date(y, m - 1, d);
-}
-
-function fmtDate(s: string): string {
-  const d = fromYmd(s);
-  if (!d) return "—";
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const yy = String(d.getFullYear()).slice(-2);
-  return `${dd}/${mm}/${yy}`;
-}
+import {
+  advanceAmount,
+  formatReceivableDate as fmtDate,
+  hasRealInvoice,
+  netAfterTds,
+  receivableAgeDays as ageDays,
+  receivableStatusKind as statusKind,
+  selectReceivables,
+  type ReceivableFilterKey as FilterKey,
+  type ReceivableStatusKind as StatusKind,
+} from "../../lib/receivables";
 
 /** Loom display: bare number "6" → "L6"; already-prefixed "L6" stays as-is. */
 function fmtLoom(raw?: string): string {
   const t = (raw || "").trim();
   if (!t) return "";
   return /^\d+$/.test(t) ? `L${t}` : t.toUpperCase();
-}
-
-function ageDays(s: string): number | null {
-  const d = fromYmd(s);
-  if (!d) return null;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return Math.round((today.getTime() - d.getTime()) / 86400000);
 }
 
 function lerp(a: number, b: number, t: number): number {
@@ -70,55 +43,6 @@ function ageColor(days: number): string | null {
   return null;
 }
 
-type StatusKind = "unbilled" | "advance" | "paid" | "partial" | "pending";
-
-// A real invoice number — not blank and not a placeholder like
-// "invoice not created" used when an advance is received before billing.
-function hasRealInvoice(r: ReceivableRow): boolean {
-  const inv = (r.invoiceNumber || "").trim().toLowerCase();
-  if (!inv) return false;
-  if (inv.includes("not created") || inv.includes("no invoice") || inv.includes("not yet")) {
-    return false;
-  }
-  return true;
-}
-
-// Advance = money received while there is no invoice yet.
-function advanceAmount(r: ReceivableRow): number {
-  return !hasRealInvoice(r) ? (r.receipts || 0) : 0;
-}
-
-// Canonical party key — case- and whitespace-insensitive, so the same company
-// typed with different capitalisation / spacing in the sheet collapses to one.
-function partyKey(p?: string): string {
-  return (p || "").trim().replace(/\s+/g, " ").toLowerCase();
-}
-
-function statusKind(r: ReceivableRow): StatusKind {
-  const s = (r.paymentStatus || r.status || "").toLowerCase();
-  if (!hasRealInvoice(r)) {
-    // No invoice yet: an advance if money is in, otherwise simply unbilled.
-    return (r.receipts || 0) > 0 ? "advance" : "unbilled";
-  }
-  // Honor explicit "Paid" mark from sheet — settlements with TDS / small
-  // debits won't show full receipts, so trust the status label.
-  if (s.includes("paid") && !s.includes("partial") && !s.includes("unpaid")) return "paid";
-  if (s.includes("partial")) return "partial";
-  if (effectivePending(r) <= 0 && r.invoiceAmount > 0) return "paid";
-  return "pending";
-}
-
-function effectivePending(r: ReceivableRow): number {
-  // Only raised invoices are receivables. Advances / unbilled rows are not.
-  if (!hasRealInvoice(r)) return 0;
-  const s = (r.paymentStatus || r.status || "").toLowerCase();
-  if (s.includes("paid") && !s.includes("partial") && !s.includes("unpaid")) return 0;
-  if (r.invoiceAmount > 0) {
-    return Math.max(0, r.invoiceAmount - (r.receipts || 0));
-  }
-  return r.pendingBalance;
-}
-
 function statusBadge(kind: StatusKind, overdueDays: number | null) {
   if (kind === "unbilled") return { label: "Unbilled", cls: "bg-gray-100 text-gray-700" };
   if (kind === "advance") return { label: "Advance", cls: "bg-emerald-100 text-emerald-700" };
@@ -131,6 +55,7 @@ function statusBadge(kind: StatusKind, overdueDays: number | null) {
 }
 
 export function PartnerReceivables() {
+  const navigate = useNavigate();
   const [rows, setRows] = useState<ReceivableRow[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -155,148 +80,28 @@ export function PartnerReceivables() {
     };
   }, []);
 
-  const filtered = useMemo(() => {
-    if (!rows) return [];
-    return rows.filter((r) => {
-      const kind = statusKind(r);
-      if (filter === "all") return true;
-      if (filter === "unbilled") return kind === "unbilled";
-      if (filter === "advance") return kind === "advance";
-      if (filter === "partial") return kind === "partial";
-      if (filter === "pending") return kind === "pending" || kind === "partial";
-      if (filter === "overdue") {
-        if (kind === "paid" || kind === "unbilled") return false;
-        const od = ageDays(r.dueDate);
-        return od !== null && od > 0 && effectivePending(r) > 0;
-      }
-      return true;
-    });
-  }, [rows, filter]);
-
-  const merged = useMemo(() => {
-    // Combine rows that share the same invoice number into one logical invoice.
-    // Sum invoiceAmount + receipts; keep earliest invoiceDate, latest dueDate / receivedOn.
-    const byInv = new Map<string, ReceivableRow>();
-    const byAdvance = new Map<string, ReceivableRow>();
-    const passthrough: ReceivableRow[] = [];
-    for (const r of filtered) {
-      if (!hasRealInvoice(r)) {
-        // Advances for the same design (party + order id / customer) collapse
-        // into one entry, mirroring the single invoice raised later. Amounts
-        // are summed (the advance is recorded on one of the design's rows).
-        if ((r.receipts || 0) > 0) {
-          const design = ((r.orderId || "").trim() || (r.customerName || "").trim()).toLowerCase();
-          const advKey = `${partyKey(r.party)}||adv||${design}`;
-          const prevAdv = byAdvance.get(advKey);
-          if (!prevAdv) {
-            byAdvance.set(advKey, { ...r });
-            continue;
-          }
-          prevAdv.receipts = (prevAdv.receipts || 0) + (r.receipts || 0);
-          prevAdv.pendingBalance = (prevAdv.pendingBalance || 0) + (r.pendingBalance || 0);
-          const aAdv = fromYmd(prevAdv.receivedOn)?.getTime() ?? -Infinity;
-          const bAdv = fromYmd(r.receivedOn)?.getTime() ?? -Infinity;
-          if (bAdv > aAdv && r.receivedOn) prevAdv.receivedOn = r.receivedOn;
-          const prevLm = prevAdv.loadedLoom || prevAdv.loomNumber || "";
-          const rowLm = r.loadedLoom || r.loomNumber || "";
-          if (prevLm && rowLm && !prevLm.includes(rowLm)) {
-            prevAdv.loadedLoom = `${prevLm}, ${rowLm}`;
-          }
-          if (prevAdv.paaguId && r.paaguId && !prevAdv.paaguId.includes(r.paaguId)) {
-            prevAdv.paaguId = `${prevAdv.paaguId}, ${r.paaguId}`;
-          }
-          continue;
-        }
-        passthrough.push(r);
-        continue;
-      }
-      const inv = (r.invoiceNumber || "").trim();
-      const key = `${partyKey(r.party)}||${inv}`;
-      const prev = byInv.get(key);
-      if (!prev) {
-        byInv.set(key, { ...r });
-        continue;
-      }
-      prev.invoiceAmount = (prev.invoiceAmount || 0) + (r.invoiceAmount || 0);
-      prev.receipts = (prev.receipts || 0) + (r.receipts || 0);
-      prev.pendingBalance = (prev.pendingBalance || 0) + (r.pendingBalance || 0);
-      const aInv = fromYmd(prev.invoiceDate)?.getTime() ?? Infinity;
-      const bInv = fromYmd(r.invoiceDate)?.getTime() ?? Infinity;
-      if (bInv < aInv && r.invoiceDate) prev.invoiceDate = r.invoiceDate;
-      const aDue = fromYmd(prev.dueDate)?.getTime() ?? -Infinity;
-      const bDue = fromYmd(r.dueDate)?.getTime() ?? -Infinity;
-      if (bDue > aDue && r.dueDate) prev.dueDate = r.dueDate;
-      const aRcv = fromYmd(prev.receivedOn)?.getTime() ?? -Infinity;
-      const bRcv = fromYmd(r.receivedOn)?.getTime() ?? -Infinity;
-      if (bRcv > aRcv && r.receivedOn) prev.receivedOn = r.receivedOn;
-      if (!prev.paymentStatus && r.paymentStatus) prev.paymentStatus = r.paymentStatus;
-      if (!prev.status && r.status) prev.status = r.status;
-      const prevCustomer = prev.customerName || prev.designDetails || "";
-      const rowCustomer = r.customerName || r.designDetails || "";
-      if (prevCustomer && rowCustomer && !prevCustomer.includes(rowCustomer)) {
-        prev.customerName = `${prevCustomer}, ${rowCustomer}`;
-      }
-      const prevLoom = prev.loadedLoom || prev.loomNumber || "";
-      const rowLoom = r.loadedLoom || r.loomNumber || "";
-      if (prevLoom && rowLoom && !prevLoom.includes(rowLoom)) {
-        prev.loadedLoom = `${prevLoom}, ${rowLoom}`;
-      }
-      if (prev.paaguId && r.paaguId && !prev.paaguId.includes(r.paaguId)) {
-        prev.paaguId = `${prev.paaguId}, ${r.paaguId}`;
-      }
-    }
-    return [...Array.from(byInv.values()), ...Array.from(byAdvance.values()), ...passthrough];
-  }, [filtered]);
-
-  const grouped = useMemo(() => {
-    const map = new Map<string, { party: string; total: number; advance: number; count: number; overdue: number; rows: ReceivableRow[] }>();
-    for (const r of merged) {
-      const key = partyKey(r.party);
-      if (!key) continue;
-      let g = map.get(key);
-      if (!g) {
-        g = { party: (r.party || "").trim(), total: 0, advance: 0, count: 0, overdue: 0, rows: [] };
-        map.set(key, g);
-      }
-      g.total += effectivePending(r);
-      g.advance += advanceAmount(r);
-      g.count += 1;
-      const kind = statusKind(r);
-      const od = ageDays(r.dueDate);
-      if (kind !== "paid" && kind !== "unbilled" && od !== null && od > 0 && effectivePending(r) > 0) {
-        g.overdue += 1;
-      }
-      g.rows.push(r);
-    }
-    const list = Array.from(map.values());
-    list.sort((a, b) => b.total - a.total);
-    for (const g of list) {
-      g.rows.sort((a, b) => {
-        const ad = fromYmd(a.invoiceDate)?.getTime() ?? 0;
-        const bd = fromYmd(b.invoiceDate)?.getTime() ?? 0;
-        return bd - ad;
-      });
-    }
-    return list;
-  }, [filtered]);
-
-  const grandTotal = useMemo(
-    () => grouped.reduce((s, g) => s + g.total, 0),
-    [grouped],
-  );
-
-  const grandAdvance = useMemo(
-    () => grouped.reduce((s, g) => s + g.advance, 0),
-    [grouped],
+  const { merged, grouped, grandTotal, grandAdvance } = useMemo(
+    () => selectReceivables(rows || [], filter),
+    [rows, filter],
   );
 
   return (
     <div className="px-4 pt-4 pb-6">
-      <div className="mb-3">
-        <h2 className="text-[18px] font-bold text-[var(--color-text-primary)]">Receivables</h2>
-        <p className="text-[14px] text-[var(--color-text-secondary)] mt-0.5">
-          Party-wise pending against raised invoices.
-        </p>
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-[18px] font-bold text-[var(--color-text-primary)]">Receivables</h2>
+          <p className="text-[14px] text-[var(--color-text-secondary)] mt-0.5">
+            Party-wise pending against raised invoices.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => navigate("/partner/receivables/report")}
+          className="shrink-0 inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[13px] font-semibold text-red-700 transition-colors hover:bg-red-100"
+        >
+          <FilePdf className="h-4 w-4" weight="bold" />
+          Overdue report
+        </button>
       </div>
 
       <div className="mb-3 flex gap-2 overflow-x-auto -mx-1 px-1">

@@ -90,12 +90,6 @@ export function PartnerDay() {
 
   return (
     <div className="px-4 py-4">
-      <div className="mb-3">
-        <span className="inline-flex rounded-full bg-[var(--color-brand-primary)]/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--color-brand-primary)]">
-          test push
-        </span>
-      </div>
-
       {/* Day stepper */}
       <div className="flex items-center justify-between mb-4">
         <button
