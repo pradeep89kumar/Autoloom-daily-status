@@ -1,6 +1,12 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
-import { ArrowLeft, Printer, CircleNotch } from "@phosphor-icons/react";
+import {
+  ArrowLeft,
+  CircleNotch,
+  DownloadSimple,
+  WhatsappLogo,
+} from "@phosphor-icons/react";
+import { buildCashReportPdf, cashReportFilename } from "../../lib/cashReportPdf";
 import {
   fetchCashflow,
   fetchCashLedger,
@@ -55,6 +61,17 @@ function fmtSignedINR(n: number): string {
   return `${sign}₹${Math.abs(Math.round(n)).toLocaleString("en-IN")}`;
 }
 
+function downloadFile(file: File) {
+  const url = URL.createObjectURL(file);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = file.name;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+}
+
 // Newest-first list of selectable months (current month + previous ones).
 // The current month is tagged "(so far)" since it is still in progress.
 function buildMonthOptions(count: number): { key: string; label: string }[] {
@@ -81,6 +98,10 @@ export function PartnerCashReport() {
   const [ledger, setLedger] = useState<CashLedgerEntry[] | null>(null);
   const [cashflow, setCashflow] = useState<CashflowData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
 
   const today = useMemo(() => {
     const d = new Date();
@@ -102,9 +123,10 @@ export function PartnerCashReport() {
     return { start, end, periodEnd, complete };
   }, [monthKey, today]);
 
+  const generatedAtDate = useMemo(() => new Date(), []);
   const generatedAt = useMemo(
-    () => new Date().toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }),
-    [],
+    () => generatedAtDate.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }),
+    [generatedAtDate],
   );
 
   useEffect(() => {
@@ -172,22 +194,121 @@ export function PartnerCashReport() {
     return Array.from(map.entries()).map(([date, entries]) => ({ date, entries }));
   }, [ledger]);
 
+  useEffect(() => {
+    let alive = true;
+    setMessage("");
+    setError("");
+    setPdfFile(null);
+
+    if (loading || ledger === null) {
+      setPdfBusy(loading);
+      return () => {
+        alive = false;
+      };
+    }
+
+    setPdfBusy(true);
+    buildCashReportPdf({
+      periodStart: period.start,
+      periodEnd: period.periodEnd,
+      periodComplete: period.complete,
+      generatedAt: generatedAtDate,
+      totals,
+      accountStats,
+      groups,
+      cashflow,
+    })
+      .then((blob) => {
+        if (!alive) return;
+        setPdfFile(
+          new File([blob], cashReportFilename(period.start), {
+            type: "application/pdf",
+          }),
+        );
+        setPdfBusy(false);
+      })
+      .catch((reason: unknown) => {
+        if (!alive) return;
+        console.error("[cash-report] PDF generation failed", reason);
+        setError("The PDF could not be prepared. Please try again.");
+        setPdfBusy(false);
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [accountStats, cashflow, generatedAtDate, groups, ledger, loading, period, totals]);
+
+  const handleDownload = () => {
+    if (!pdfFile) return;
+    downloadFile(pdfFile);
+    setError("");
+    setMessage("PDF downloaded.");
+  };
+
+  const openWhatsAppFallback = (file: File) => {
+    downloadFile(file);
+    const text = [
+      `SAT cash report - ${monthTitle(period.start)}`,
+      "The PDF has been downloaded. Please attach it to this WhatsApp chat.",
+    ].join(" · ");
+    window.location.assign(`https://wa.me/?text=${encodeURIComponent(text)}`);
+    setError("");
+    setMessage("PDF downloaded. Attach it in WhatsApp.");
+  };
+
+  const handleWhatsApp = async () => {
+    if (!pdfFile) return;
+    setMessage("");
+    setError("");
+    const reportTitle = `SAT cash report - ${monthTitle(period.start)}`;
+    const shareData: ShareData = {
+      title: reportTitle,
+      text: `Attached: ${reportTitle}.`,
+      files: [pdfFile],
+    };
+    const canShareFile =
+      typeof navigator.share === "function" &&
+      (typeof navigator.canShare !== "function" || navigator.canShare(shareData));
+
+    if (!canShareFile) {
+      openWhatsAppFallback(pdfFile);
+      return;
+    }
+
+    try {
+      await navigator.share(shareData);
+      setMessage("PDF shared.");
+    } catch (reason) {
+      if (reason instanceof DOMException && reason.name === "AbortError") return;
+      console.warn("[cash-report] File sharing failed", reason);
+      openWhatsAppFallback(pdfFile);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-white text-black">
       {/* Screen-only action bar */}
-      <div className="no-print sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-black/10 bg-white px-4 py-3">
+      <div className="no-print sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 border-b border-black/10 bg-white px-4 py-3">
         <button
+          type="button"
           onClick={() => navigate(-1)}
           className="inline-flex items-center gap-1.5 text-[14px] font-medium text-black/70"
         >
           <ArrowLeft className="h-4 w-4" weight="bold" />
           Back
         </button>
-        <div className="flex items-center gap-2">
+        <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto">
           <select
             value={monthKey}
-            onChange={(e) => setMonthKey(e.target.value)}
-            className="rounded-lg border border-black/15 bg-white px-2.5 py-2 text-[13px] font-medium text-black/80"
+            onChange={(e) => {
+              setPdfFile(null);
+              setMessage("");
+              setError("");
+              setMonthKey(e.target.value);
+            }}
+            disabled={loading}
+            className="h-10 min-w-0 flex-1 rounded-lg border border-black/15 bg-white px-2.5 text-[13px] font-medium text-black/80 disabled:opacity-50 sm:flex-none"
           >
             {monthOptions.map((o) => (
               <option key={o.key} value={o.key}>
@@ -196,19 +317,43 @@ export function PartnerCashReport() {
             ))}
           </select>
           <button
-            onClick={() => window.print()}
-            disabled={loading}
-            className="inline-flex items-center gap-2 rounded-lg bg-black px-4 py-2 text-[14px] font-semibold text-white disabled:opacity-50"
+            type="button"
+            onClick={handleDownload}
+            disabled={loading || pdfBusy || !pdfFile}
+            aria-label="Download PDF"
+            title="Download PDF"
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-black/20 bg-white text-black/80 hover:bg-black/[0.04] disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {loading ? (
+            {loading || pdfBusy ? (
               <CircleNotch className="h-4 w-4 animate-spin" weight="bold" />
             ) : (
-              <Printer className="h-4 w-4" weight="bold" />
+              <DownloadSimple className="h-4 w-4" weight="bold" />
             )}
-            Save as PDF
+          </button>
+          <button
+            type="button"
+            onClick={handleWhatsApp}
+            disabled={loading || pdfBusy || !pdfFile}
+            aria-label="Share PDF on WhatsApp"
+            title="Share PDF on WhatsApp"
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-black/20 bg-white text-black/80 hover:bg-black/[0.04] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <WhatsappLogo className="h-5 w-5" weight="fill" />
           </button>
         </div>
       </div>
+
+      {(message || error) && (
+        <p
+          className={`no-print mx-auto max-w-[794px] px-6 pt-4 text-[13px] font-medium ${
+            error ? "text-red-700" : "text-emerald-700"
+          }`}
+          role="status"
+          aria-live="polite"
+        >
+          {error || message}
+        </p>
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center py-24 text-black/50">

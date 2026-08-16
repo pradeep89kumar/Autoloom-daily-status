@@ -209,24 +209,25 @@ export function PartnerReceivablesReport() {
               type="button"
               onClick={handleDownload}
               disabled={!pdfFile || pdfBusy}
-              className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              aria-label="Download PDF"
+              title="Download PDF"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-800 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {pdfBusy ? (
                 <CircleNotch className="h-4 w-4 animate-spin" weight="bold" />
               ) : (
                 <DownloadSimple className="h-4 w-4" weight="bold" />
               )}
-              <span className="hidden sm:inline">Download PDF</span>
-              <span className="sm:hidden">PDF</span>
             </button>
             <button
               type="button"
               onClick={handleWhatsApp}
               disabled={!pdfFile || pdfBusy}
-              className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-[#168b45] px-3 text-sm font-semibold text-white shadow-sm hover:bg-[#11783a] disabled:cursor-not-allowed disabled:opacity-50"
+              aria-label="Share PDF on WhatsApp"
+              title="Share PDF on WhatsApp"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-800 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <WhatsappLogo className="h-5 w-5" weight="fill" />
-              WhatsApp
             </button>
           </div>
         </div>
