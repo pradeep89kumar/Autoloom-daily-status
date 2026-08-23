@@ -97,10 +97,10 @@ export function PartnerReceivables() {
         <button
           type="button"
           onClick={() => navigate("/partner/receivables/report")}
-          className="shrink-0 inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[13px] font-semibold text-red-700 transition-colors hover:bg-red-100"
+          className="shrink-0 inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[13px] font-semibold text-blue-700 transition-colors hover:bg-blue-100"
         >
           <FilePdf className="h-4 w-4" weight="bold" />
-          Overdue report
+          Generate report
         </button>
       </div>
 

@@ -10,6 +10,9 @@ export type ReceivableFilterKey =
 
 export type ReceivableStatusKind = "unbilled" | "advance" | "paid" | "partial" | "pending";
 
+export type ReceivablesReportScope = "outstanding" | "overdue" | "not-due";
+export type ReceivablesReportPaymentStatus = "all" | "pending" | "partial";
+
 export interface ReceivablePartyGroup {
   key: string;
   party: string;
@@ -109,6 +112,30 @@ export function isOverdueReceivable(row: ReceivableRow): boolean {
   if (kind === "paid" || kind === "unbilled") return false;
   const overdueDays = receivableAgeDays(row.dueDate);
   return overdueDays !== null && overdueDays > 0 && effectivePending(row) > 0;
+}
+
+export function isOutstandingReceivable(row: ReceivableRow): boolean {
+  const kind = receivableStatusKind(row);
+  return (
+    hasRealInvoice(row) &&
+    (kind === "pending" || kind === "partial") &&
+    effectivePending(row) > 0
+  );
+}
+
+export function isNotYetDueReceivable(row: ReceivableRow): boolean {
+  if (!isOutstandingReceivable(row)) return false;
+  const dueDays = receivableAgeDays(row.dueDate);
+  return dueDays !== null && dueDays <= 0;
+}
+
+export function receivableDuePosition(row: ReceivableRow): string {
+  const dueDays = receivableAgeDays(row.dueDate);
+  if (dueDays === null) return "No due date";
+  if (dueDays > 0) return `Overdue ${dueDays} ${dueDays === 1 ? "day" : "days"}`;
+  if (dueDays === 0) return "Due today";
+  const daysUntilDue = Math.abs(dueDays);
+  return `Due in ${daysUntilDue} ${daysUntilDue === 1 ? "day" : "days"}`;
 }
 
 export function filterReceivableRows(
@@ -267,4 +294,30 @@ export function selectReceivables(rows: ReceivableRow[], filter: ReceivableFilte
   const grandAdvance = grouped.reduce((sum, group) => sum + group.advance, 0);
 
   return { filtered, merged, grouped, grandTotal, grandAdvance };
+}
+
+export function selectReceivablesReport(
+  rows: ReceivableRow[],
+  scope: ReceivablesReportScope,
+  paymentStatus: ReceivablesReportPaymentStatus,
+) {
+  // Keep the established overdue pipeline untouched. The broader report scopes
+  // start from the existing Pending population, which already includes Partial.
+  const baseMerged =
+    scope === "overdue"
+      ? selectReceivables(rows, "overdue").merged
+      : selectReceivables(rows, "pending").merged.filter((row) =>
+          scope === "not-due"
+            ? isNotYetDueReceivable(row)
+            : isOutstandingReceivable(row),
+        );
+
+  const merged = baseMerged.filter((row) => {
+    if (paymentStatus === "all") return true;
+    return receivableStatusKind(row) === paymentStatus;
+  });
+  const grouped = groupReceivableRows(merged);
+  const grandTotal = grouped.reduce((sum, group) => sum + group.total, 0);
+
+  return { merged, grouped, grandTotal };
 }
