@@ -4,9 +4,10 @@ import {
   formatReceivableDate,
   isNotYetDueReceivable,
   isOverdueReceivable,
-  receivableDuePosition,
-  receivableStatusKind,
+  receivableDueBadge,
+  receivablePaymentBadge,
   type ReceivablePartyGroup,
+  type ReceivableBadgeTone,
   type ReceivablesReportPaymentStatus,
   type ReceivablesReportScope,
 } from "./receivables";
@@ -27,14 +28,38 @@ function displayDesign(row: ReceivableRow): string {
   return (row.customerName || row.designDetails || row.orderId || "-").trim();
 }
 
-function displayStatus(row: ReceivableRow): string {
-  return receivableStatusKind(row) === "partial" ? "Partial" : "Pending";
-}
-
 function formatPdfDate(value: string): string {
   const formatted = formatReceivableDate(value);
   return formatted === "—" ? "-" : formatted;
 }
+
+type PdfRgb = [number, number, number];
+
+const PDF_BADGE_COLORS: Record<
+  ReceivableBadgeTone,
+  { fill: PdfRgb; border: PdfRgb; text: PdfRgb }
+> = {
+  danger: {
+    fill: [254, 242, 242],
+    border: [185, 28, 28],
+    text: [153, 27, 27],
+  },
+  warning: {
+    fill: [255, 251, 235],
+    border: [180, 83, 9],
+    text: [146, 64, 14],
+  },
+  info: {
+    fill: [239, 246, 255],
+    border: [37, 99, 235],
+    text: [30, 64, 175],
+  },
+  neutral: {
+    fill: [248, 250, 252],
+    border: [100, 116, 139],
+    text: [51, 65, 85],
+  },
+};
 
 export function receivablesReportTitle(scope: ReceivablesReportScope): string {
   return scope === "overdue" ? "SAT overdue report" : "SAT outstanding report";
@@ -123,6 +148,52 @@ export async function buildReceivablesReportPdf(
       shortened = shortened.slice(0, -1);
     }
     return `${shortened.trimEnd()}...`;
+  };
+
+  const badgeHeight = 5.4;
+  const dueBadgeCellMinHeight = 8.2;
+  const statusBadgeCellMinHeight = 12.3;
+  const drawBadge = (
+    label: string,
+    tone: ReceivableBadgeTone,
+    cell: { x: number; y: number; width: number; height: number },
+    placement: "center" | "below-amount",
+  ) => {
+    const previousFont = doc.getFont();
+    const previousFontSize = doc.getFontSize();
+    const previousTextColor = doc.getTextColor();
+    const previousFillColor = doc.getFillColor();
+    const previousDrawColor = doc.getDrawColor();
+    const previousLineWidth = doc.getLineWidth();
+    const palette = PDF_BADGE_COLORS[tone];
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(6.3);
+    const maxWidth = Math.max(8, cell.width - 2.8);
+    const visibleLabel = fitText(label, maxWidth - 2.8);
+    const badgeWidth = Math.min(maxWidth, doc.getTextWidth(visibleLabel) + 2.8);
+    const badgeX =
+      placement === "below-amount"
+        ? cell.x + cell.width - 1.4 - badgeWidth
+        : cell.x + (cell.width - badgeWidth) / 2;
+    const badgeY =
+      placement === "below-amount"
+        ? Math.min(cell.y + 5, cell.y + cell.height - 1.3 - badgeHeight)
+        : cell.y + (cell.height - badgeHeight) / 2;
+
+    doc.setFillColor(...palette.fill);
+    doc.setDrawColor(...palette.border);
+    doc.setLineWidth(0.28);
+    doc.roundedRect(badgeX, badgeY, badgeWidth, badgeHeight, 1.2, 1.2, "FD");
+    doc.setTextColor(...palette.text);
+    doc.text(visibleLabel, badgeX + badgeWidth / 2, badgeY + 3.55, { align: "center" });
+
+    doc.setFont(previousFont.fontName, previousFont.fontStyle);
+    doc.setFontSize(previousFontSize);
+    doc.setTextColor(previousTextColor);
+    doc.setFillColor(previousFillColor);
+    doc.setDrawColor(previousDrawColor);
+    doc.setLineWidth(previousLineWidth);
   };
 
   const drawFirstPageHeader = () => {
@@ -248,9 +319,9 @@ export async function buildReceivablesReportPdf(
       row.invoiceNumber || "-",
       displayDesign(row),
       `Invoice: ${formatPdfDate(row.invoiceDate)}\nDue: ${formatPdfDate(row.dueDate)}\nReceived: ${formatPdfDate(row.receivedOn)}`,
-      receivableDuePosition(row),
+      receivableDueBadge(row).compactLabel,
       `Bill: ${formatPdfAmount(row.invoiceAmount)}\nReceived: ${formatPdfAmount(row.receipts || 0)}`,
-      `${formatPdfAmount(effectivePending(row))}\n${displayStatus(row)}`,
+      `${formatPdfAmount(effectivePending(row))}\n${receivablePaymentBadge(row).compactLabel}`,
     ]);
     const partySubtotalRow = [
       {
@@ -310,6 +381,8 @@ export async function buildReceivablesReportPdf(
               index === 0 || index === 5 ? "bold" : "normal",
             ),
           ),
+          dueBadgeCellMinHeight,
+          statusBadgeCellMinHeight,
         )
       : 0;
     const partySubtotalHeight = Math.max(
@@ -420,6 +493,39 @@ export async function buildReceivablesReportPdf(
       showHead: "everyPage",
       showFoot: "lastPage",
       rowPageBreak: "avoid",
+      didParseCell: (data) => {
+        if (data.section !== "body") return;
+        const row = group.rows[data.row.index];
+        if (!row) return;
+        if (data.column.index === 3) {
+          data.cell.text = [];
+          data.cell.styles.minCellHeight = Math.max(
+            Number(data.cell.styles.minCellHeight) || 0,
+            dueBadgeCellMinHeight,
+          );
+        }
+        if (data.column.index === 5) {
+          data.cell.text = [formatPdfAmount(effectivePending(row))];
+          data.cell.styles.minCellHeight = Math.max(
+            Number(data.cell.styles.minCellHeight) || 0,
+            statusBadgeCellMinHeight,
+          );
+          data.cell.styles.valign = "top";
+        }
+      },
+      didDrawCell: (data) => {
+        if (data.section !== "body") return;
+        const row = group.rows[data.row.index];
+        if (!row) return;
+        if (data.column.index === 3) {
+          const badge = receivableDueBadge(row);
+          drawBadge(badge.compactLabel, badge.tone, data.cell, "center");
+        }
+        if (data.column.index === 5) {
+          const badge = receivablePaymentBadge(row);
+          drawBadge(badge.compactLabel, badge.tone, data.cell, "below-amount");
+        }
+      },
       willDrawPage: (data) => {
         if (data.pageNumber === 1) return;
         drawContinuationPageHeader();

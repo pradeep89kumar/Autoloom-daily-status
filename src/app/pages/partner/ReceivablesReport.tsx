@@ -12,9 +12,11 @@ import {
   formatReceivableDate,
   isNotYetDueReceivable,
   isOverdueReceivable,
-  receivableDuePosition,
-  receivableStatusKind,
+  receivableDueBadge,
+  receivablePaymentBadge,
   selectReceivablesReport,
+  type ReceivableBadge,
+  type ReceivableBadgeTone,
   type ReceivablesReportPaymentStatus,
   type ReceivablesReportScope,
 } from "../../lib/receivables";
@@ -40,12 +42,26 @@ const PAYMENT_STATUSES: { value: ReceivablesReportPaymentStatus; label: string }
   { value: "partial", label: "Partial" },
 ];
 
+const BADGE_CLASSES: Record<ReceivableBadgeTone, string> = {
+  danger: "border-red-200 bg-red-50 text-red-700",
+  warning: "border-amber-200 bg-amber-50 text-amber-800",
+  info: "border-blue-200 bg-blue-50 text-blue-700",
+  neutral: "border-slate-300 bg-slate-100 text-slate-700",
+};
+
 function designOrCustomer(row: ReceivableRow): string {
   return (row.customerName || row.designDetails || row.orderId || "—").trim();
 }
 
-function paymentStatus(row: ReceivableRow): string {
-  return receivableStatusKind(row) === "partial" ? "Partial" : "Pending";
+function ReceivableTag({ badge, ariaLabel }: { badge: ReceivableBadge; ariaLabel: string }) {
+  return (
+    <span
+      aria-label={ariaLabel}
+      className={`inline-flex items-center whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs font-bold leading-5 ${BADGE_CLASSES[badge.tone]}`}
+    >
+      {badge.label}
+    </span>
+  );
 }
 
 function reportDescription(scope: ReceivablesReportScope): string {
@@ -427,51 +443,86 @@ export function PartnerReceivablesReport() {
                       <table className="w-full min-w-[1080px] border-collapse text-left text-[13px]">
                         <thead className="bg-slate-100 text-xs uppercase tracking-wide text-slate-600">
                           <tr>
-                            <th className="px-3 py-2.5 font-bold">Invoice #</th>
-                            <th className="px-3 py-2.5 font-bold">Design / customer</th>
-                            <th className="px-3 py-2.5 font-bold">Invoice date</th>
-                            <th className="px-3 py-2.5 font-bold">Due date</th>
-                            <th className="px-3 py-2.5 font-bold">Due position</th>
-                            <th className="px-3 py-2.5 text-right font-bold">Bill amount</th>
-                            <th className="px-3 py-2.5 text-right font-bold">Received</th>
-                            <th className="px-3 py-2.5 font-bold">Received on</th>
-                            <th className="px-3 py-2.5 text-right font-bold">Outstanding</th>
-                            <th className="px-3 py-2.5 font-bold">Status</th>
+                            <th scope="col" className="px-3 py-2.5 font-bold">
+                              Invoice #
+                            </th>
+                            <th scope="col" className="px-3 py-2.5 font-bold">
+                              Design / customer
+                            </th>
+                            <th scope="col" className="px-3 py-2.5 font-bold">
+                              Invoice date
+                            </th>
+                            <th scope="col" className="px-3 py-2.5 font-bold">
+                              Due date
+                            </th>
+                            <th scope="col" className="px-3 py-2.5 font-bold">
+                              Due position
+                            </th>
+                            <th scope="col" className="px-3 py-2.5 text-right font-bold">
+                              Bill amount
+                            </th>
+                            <th scope="col" className="px-3 py-2.5 text-right font-bold">
+                              Received
+                            </th>
+                            <th scope="col" className="px-3 py-2.5 font-bold">
+                              Received on
+                            </th>
+                            <th scope="col" className="px-3 py-2.5 text-right font-bold">
+                              Outstanding
+                            </th>
+                            <th scope="col" className="px-3 py-2.5 font-bold">
+                              Status
+                            </th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-200">
-                          {group.rows.map((row, index) => (
-                            <tr key={`${group.key}-${row.invoiceNumber}-${index}`} className="bg-white">
-                              <td className="whitespace-nowrap px-3 py-3 font-semibold text-slate-900">
-                                {row.invoiceNumber || "—"}
-                              </td>
-                              <td className="max-w-[260px] px-3 py-3 text-slate-700">
-                                {designOrCustomer(row)}
-                              </td>
-                              <td className="whitespace-nowrap px-3 py-3 tabular-nums text-slate-700">
-                                {formatReceivableDate(row.invoiceDate)}
-                              </td>
-                              <td className="whitespace-nowrap px-3 py-3 tabular-nums text-slate-700">
-                                {formatReceivableDate(row.dueDate)}
-                              </td>
-                              <td className="whitespace-nowrap px-3 py-3 font-semibold text-slate-700">
-                                {receivableDuePosition(row)}
-                              </td>
-                              <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums text-slate-700">
-                                {fmtRupees(row.invoiceAmount)}
-                              </td>
-                              <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums text-slate-700">
-                                {fmtRupees(row.receipts || 0)}
-                              </td>
-                              <td className="whitespace-nowrap px-3 py-3 tabular-nums text-slate-700">
-                                {formatReceivableDate(row.receivedOn)}
-                              </td>
-                              <td className="whitespace-nowrap px-3 py-3 text-right font-bold tabular-nums text-slate-950">
-                                {fmtRupees(effectivePending(row))}
-                              </td>
-                              <td className="px-3 py-3 text-slate-700">{paymentStatus(row)}</td>
-                            </tr>
-                          ))}
+                          {group.rows.map((row, index) => {
+                            const dueBadge = receivableDueBadge(row);
+                            const statusBadge = receivablePaymentBadge(row);
+                            return (
+                              <tr
+                                key={`${group.key}-${row.invoiceNumber}-${index}`}
+                                className="bg-white"
+                              >
+                                <td className="whitespace-nowrap px-3 py-3 font-semibold text-slate-900">
+                                  {row.invoiceNumber || "—"}
+                                </td>
+                                <td className="max-w-[260px] px-3 py-3 text-slate-700">
+                                  {designOrCustomer(row)}
+                                </td>
+                                <td className="whitespace-nowrap px-3 py-3 tabular-nums text-slate-700">
+                                  {formatReceivableDate(row.invoiceDate)}
+                                </td>
+                                <td className="whitespace-nowrap px-3 py-3 tabular-nums text-slate-700">
+                                  {formatReceivableDate(row.dueDate)}
+                                </td>
+                                <td className="whitespace-nowrap px-3 py-3">
+                                  <ReceivableTag
+                                    badge={dueBadge}
+                                    ariaLabel={`Due position: ${dueBadge.label}`}
+                                  />
+                                </td>
+                                <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums text-slate-700">
+                                  {fmtRupees(row.invoiceAmount)}
+                                </td>
+                                <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums text-slate-700">
+                                  {fmtRupees(row.receipts || 0)}
+                                </td>
+                                <td className="whitespace-nowrap px-3 py-3 tabular-nums text-slate-700">
+                                  {formatReceivableDate(row.receivedOn)}
+                                </td>
+                                <td className="whitespace-nowrap px-3 py-3 text-right font-bold tabular-nums text-slate-950">
+                                  {fmtRupees(effectivePending(row))}
+                                </td>
+                                <td className="px-3 py-3">
+                                  <ReceivableTag
+                                    badge={statusBadge}
+                                    ariaLabel={`Payment status: ${statusBadge.label}`}
+                                  />
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                         <tfoot className="border-t-2 border-slate-300 bg-slate-50">
                           <tr>

@@ -12,6 +12,13 @@ export type ReceivableStatusKind = "unbilled" | "advance" | "paid" | "partial" |
 
 export type ReceivablesReportScope = "outstanding" | "overdue" | "not-due";
 export type ReceivablesReportPaymentStatus = "all" | "pending" | "partial";
+export type ReceivableBadgeTone = "danger" | "warning" | "info" | "neutral";
+
+export interface ReceivableBadge {
+  label: string;
+  compactLabel: string;
+  tone: ReceivableBadgeTone;
+}
 
 export interface ReceivablePartyGroup {
   key: string;
@@ -136,6 +143,36 @@ export function receivableDuePosition(row: ReceivableRow): string {
   if (dueDays === 0) return "Due today";
   const daysUntilDue = Math.abs(dueDays);
   return `Due in ${daysUntilDue} ${daysUntilDue === 1 ? "day" : "days"}`;
+}
+
+export function receivableDueBadge(row: ReceivableRow): ReceivableBadge {
+  const dueDays = receivableAgeDays(row.dueDate);
+  if (dueDays === null) {
+    return { label: "No due date", compactLabel: "NO DUE DATE", tone: "neutral" };
+  }
+  if (dueDays > 0) {
+    return {
+      label: `Overdue ${dueDays} ${dueDays === 1 ? "day" : "days"}`,
+      compactLabel: `OVERDUE ${dueDays}d`,
+      tone: "danger",
+    };
+  }
+  if (dueDays === 0) {
+    return { label: "Due today", compactLabel: "DUE TODAY", tone: "warning" };
+  }
+  const daysUntilDue = Math.abs(dueDays);
+  return {
+    label: `Due in ${daysUntilDue} ${daysUntilDue === 1 ? "day" : "days"}`,
+    compactLabel: `DUE IN ${daysUntilDue}d`,
+    tone: "neutral",
+  };
+}
+
+export function receivablePaymentBadge(row: ReceivableRow): ReceivableBadge {
+  if (receivableStatusKind(row) === "partial") {
+    return { label: "Partial", compactLabel: "PARTIAL", tone: "info" };
+  }
+  return { label: "Pending", compactLabel: "PENDING", tone: "warning" };
 }
 
 export function filterReceivableRows(
