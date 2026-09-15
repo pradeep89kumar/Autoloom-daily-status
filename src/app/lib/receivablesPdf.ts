@@ -285,6 +285,10 @@ export async function buildReceivablesReportPdf(
   let cursorY = 76;
 
   const tableColumnWidths = [23, 48, 33, 23, 31, 28];
+  const tableBodyFontSize = 7.4;
+  const tableCellPadding = 1.7;
+  const invoiceMinimumFontSize = 6.5;
+  const invoiceTwoLineMinimumFontSize = 4.5;
   const tableHeadLabels = [
     "Invoice",
     "Design / customer",
@@ -308,6 +312,103 @@ export async function buildReceivablesReportPdf(
     return Math.max(1, lines.length) * lineHeight + padding * 2;
   };
 
+  const measureInvoiceWidth = (value: string, fontSize: number): number => {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(fontSize);
+    return doc.getTextWidth(value);
+  };
+
+  const fitInvoiceFontSize = (
+    lines: string[],
+    availableWidth: number,
+    minimumFontSize: number,
+  ): number => {
+    const widestAtDefaultSize = Math.max(
+      ...lines.map((line) => measureInvoiceWidth(line, tableBodyFontSize)),
+    );
+    if (widestAtDefaultSize <= availableWidth) return tableBodyFontSize;
+
+    const calculatedSize =
+      (tableBodyFontSize * availableWidth * 0.98) / widestAtDefaultSize;
+    return Math.max(
+      minimumFontSize,
+      Math.floor(Math.min(tableBodyFontSize, calculatedSize) * 10) / 10,
+    );
+  };
+
+  const invoiceNumberLayout = (
+    invoiceNumber: string,
+  ): { lines: string[]; fontSize: number } => {
+    const value = invoiceNumber.trim() || "-";
+    const availableWidth = tableColumnWidths[0] - tableCellPadding * 2;
+    const singleLineFontSize = fitInvoiceFontSize(
+      [value],
+      availableWidth,
+      invoiceMinimumFontSize,
+    );
+
+    if (measureInvoiceWidth(value, singleLineFontSize) <= availableWidth) {
+      return { lines: [value], fontSize: singleLineFontSize };
+    }
+
+    const separatorBreaks = Array.from(value)
+      .map((character, index) => ({ character, position: index + 1 }))
+      .filter(
+        ({ character, position }) =>
+          (character === "/" || character === "-" || character === " ") &&
+          position > 1 &&
+          position < value.length,
+      )
+      .map(({ position }) => position);
+
+    const allBreaks = Array.from({ length: Math.max(0, value.length - 1) }, (_, index) =>
+      index + 1,
+    );
+    const chooseBreak = (positions: number[]): number | undefined =>
+      positions
+        .map((position) => {
+          const first = value.slice(0, position);
+          const second = value.slice(position);
+          const firstWidth = measureInvoiceWidth(first, invoiceMinimumFontSize);
+          const secondWidth = measureInvoiceWidth(second, invoiceMinimumFontSize);
+          const widest = Math.max(firstWidth, secondWidth);
+          return {
+            position,
+            fits: widest <= availableWidth,
+            widest,
+            balance: Math.abs(firstWidth - secondWidth),
+          };
+        })
+        .sort((left, right) => {
+          if (left.fits !== right.fits) return left.fits ? -1 : 1;
+          if (left.widest !== right.widest) return left.widest - right.widest;
+          return left.balance - right.balance;
+        })[0]?.position;
+
+    const separatorBreak = chooseBreak(separatorBreaks);
+    const separatorLines = separatorBreak
+      ? [value.slice(0, separatorBreak), value.slice(separatorBreak)]
+      : [];
+    const separatorFits =
+      separatorLines.length === 2 &&
+      separatorLines.every(
+        (line) => measureInvoiceWidth(line, invoiceMinimumFontSize) <= availableWidth,
+      );
+    const breakPosition = separatorFits
+      ? separatorBreak
+      : chooseBreak(allBreaks) ?? Math.ceil(value.length / 2);
+    const lines = [value.slice(0, breakPosition), value.slice(breakPosition)];
+
+    return {
+      lines,
+      fontSize: fitInvoiceFontSize(
+        lines,
+        availableWidth,
+        invoiceTwoLineMinimumFontSize,
+      ),
+    };
+  };
+
   const finalTotalLabel = options.allParties ? "Grand total" : "Report total";
 
   for (const [groupIndex, group] of groups.entries()) {
@@ -315,8 +416,11 @@ export async function buildReceivablesReportPdf(
     const partyHeading = `${group.party || "Unnamed party"} | ${group.rows.length} ${
       group.rows.length === 1 ? "invoice" : "invoices"
     } | ${formatPdfAmount(group.total)}`;
-    const bodyRows = group.rows.map((row) => [
-      row.invoiceNumber || "-",
+    const invoiceLayouts = group.rows.map((row) =>
+      invoiceNumberLayout(row.invoiceNumber || "-"),
+    );
+    const bodyRows = group.rows.map((row, rowIndex) => [
+      invoiceLayouts[rowIndex].lines.join("\n"),
       displayDesign(row),
       `Invoice: ${formatPdfDate(row.invoiceDate)}\nDue: ${formatPdfDate(row.dueDate)}\nReceived: ${formatPdfDate(row.receivedOn)}`,
       receivableDueBadge(row).compactLabel,
@@ -372,15 +476,16 @@ export async function buildReceivablesReportPdf(
     );
     const firstRowHeight = bodyRows[0]
       ? Math.max(
-          ...bodyRows[0].map((value, index) =>
-            measureCellHeight(
+          ...bodyRows[0].map((value, index) => {
+            const invoiceLayout = invoiceLayouts[0];
+            return measureCellHeight(
               value,
               tableColumnWidths[index],
-              7.4,
-              1.7,
+              index === 0 ? invoiceLayout.fontSize : tableBodyFontSize,
+              tableCellPadding,
               index === 0 || index === 5 ? "bold" : "normal",
-            ),
-          ),
+            );
+          }),
           dueBadgeCellMinHeight,
           statusBadgeCellMinHeight,
         )
@@ -451,8 +556,8 @@ export async function buildReceivablesReportPdf(
       foot: footRows,
       styles: {
         font: "helvetica",
-        fontSize: 7.4,
-        cellPadding: 1.7,
+        fontSize: tableBodyFontSize,
+        cellPadding: tableCellPadding,
         textColor: [51, 65, 85],
         lineColor: [203, 213, 225],
         lineWidth: 0.12,
@@ -497,6 +602,11 @@ export async function buildReceivablesReportPdf(
         if (data.section !== "body") return;
         const row = group.rows[data.row.index];
         if (!row) return;
+        if (data.column.index === 0) {
+          const invoiceLayout = invoiceLayouts[data.row.index];
+          data.cell.text = invoiceLayout.lines;
+          data.cell.styles.fontSize = invoiceLayout.fontSize;
+        }
         if (data.column.index === 3) {
           data.cell.text = [];
           data.cell.styles.minCellHeight = Math.max(
