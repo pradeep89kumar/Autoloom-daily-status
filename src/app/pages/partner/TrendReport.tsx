@@ -132,7 +132,7 @@ export function PartnerTrendReport() {
   const to = ymd(period.periodEnd);
   const rangeResource = useSheetResource<MasterRangeRow[]>({
     resourceKey: `trend-report:${from}:${to}`,
-    load: () => fetchMasterRangeResult(from, to),
+    load: ({ fresh }) => fetchMasterRangeResult(from, to, { fresh }),
     peek: () => peekMasterRangeCache(from, to),
   });
   const rows = useMemo(

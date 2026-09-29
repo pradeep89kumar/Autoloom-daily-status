@@ -20,6 +20,7 @@
  *  POST kind:"master-health"                  → same health check with token in JSON body
  *  GET  ?mode=cashflow                         → cash position + monthly summary from Master Control tab
  *  GET  ?mode=cashflow-ledger&from=&to=&account=&direction= → ledger entries for the statement view
+ *  GET  ?mode=cashflow-report&from=&to=&account=&direction= → cash position + filtered ledger from one sheet read
  *  GET  ?mode=capex&project=6%20Looms          → Capex Register entries + totals for one project (default "6 Looms")
  *  GET  ?mode=beams                            → Beam Register tables from R.O STATUS tab (loaded/vendor/ready/empty/master)
  *  POST kind:"edit"           → overwrite Sheet1 row by rowIndex, only inside edit window
@@ -49,15 +50,17 @@ var MASTER_CAPEX_TAB = "Capex Register";
 var MASTER_RECEIVABLES_API_VERSION = 2;
 var MASTER_RECEIVABLES_SCHEMA_VERSION = "2026-09-29";
 var MASTER_RECEIVABLES_CACHE_VERSION = "master-receivables-v1";
-var MASTER_RECEIVABLES_CACHE_TTL_SECONDS = 30;
+var MASTER_RECEIVABLES_CACHE_TTL_SECONDS = 120;
 var MASTER_RECEIVABLES_CACHE_CHUNK_BYTES = 85000;
 var MASTER_RECEIVABLES_MAX_CACHE_CHUNKS = 40;
 var MASTER_RECEIVABLES_MAX_GRID_ROWS = 50000;
 var MASTER_RECEIVABLES_MAX_DATA_ROWS = 10000;
 var MASTER_RECEIVABLES_MAX_PAGE_SIZE = 250;
 var MASTER_PRODUCTION_CACHE_VERSION = "master-production-v1";
-var MASTER_PRODUCTION_CACHE_TTL_SECONDS = 30;
+var MASTER_PRODUCTION_CACHE_TTL_SECONDS = 120;
 var MASTER_PRODUCTION_MAX_GRID_ROWS = 50000;
+var MASTER_RECEIVABLES_CACHE_LOCK_WAIT_MS = 24000;
+var MASTER_RECEIVABLES_MAX_WAIT_BEFORE_BUILD_MS = 2000;
 
 // Beam Register — separate spreadsheet tracking every physical beam asset.
 var BEAM_SHEET_ID = "1sHQIkVJcB-QfuuFVCWo16WpNjlZtLFFne5v4XvcF2YI";
@@ -248,15 +251,17 @@ function doGet(e) {
   if (mode === "catalog")  return _json({ ok: true, orders: _readOrders() });
   if (mode === "master-day") {
     var date = (e.parameter && e.parameter.date) || _ymd(new Date());
+    var masterDayFresh = _masterFreshRequested(e);
     return _json(_masterReadResponse("master-day", function () {
-      return { ok: true, date: date, rows: _readMasterDay(date) };
+      return { ok: true, date: date, rows: _readMasterDay(date, { fresh: masterDayFresh }) };
     }));
   }
   if (mode === "master-range") {
     var from = (e.parameter && e.parameter.from) || "";
     var to = (e.parameter && e.parameter.to) || _ymd(new Date());
+    var masterRangeFresh = _masterFreshRequested(e);
     return _json(_masterReadResponse("master-range", function () {
-      return { ok: true, from: from, to: to, rows: _readMasterRange(from, to) };
+      return { ok: true, from: from, to: to, rows: _readMasterRange(from, to, { fresh: masterRangeFresh }) };
     }));
   }
   if (mode === "master-orders") {
@@ -282,6 +287,18 @@ function doGet(e) {
     var cfDir  = (e.parameter && e.parameter.direction) || "";
     return _json(_masterReadResponse("cashflow-ledger", function () {
       return { ok: true, rows: _readCashLedger(cfFrom, cfTo, cfAcct, cfDir) };
+    }));
+  }
+  if (mode === "cashflow-report") {
+    var reportFrom = (e.parameter && e.parameter.from) || "";
+    var reportTo   = (e.parameter && e.parameter.to)   || _ymd(new Date());
+    var reportAcct = (e.parameter && e.parameter.account)   || "";
+    var reportDir  = (e.parameter && e.parameter.direction) || "";
+    return _json(_masterReadResponse("cashflow-report", function () {
+      return {
+        ok: true,
+        report: _readCashReport(reportFrom, reportTo, reportAcct, reportDir)
+      };
     }));
   }
   if (mode === "capex") {
@@ -1238,13 +1255,12 @@ function _readMasterProductionCache() {
       manifest.cacheVersion !== MASTER_PRODUCTION_CACHE_VERSION ||
       !Array.isArray(manifest.shardKeys) ||
       !Array.isArray(manifest.shardBytes) ||
-      manifest.shardKeys.length < 1 ||
       manifest.shardKeys.length > MASTER_RECEIVABLES_MAX_CACHE_CHUNKS ||
       manifest.shardKeys.length !== manifest.shardBytes.length
     ) {
       return null;
     }
-    var cached = cache.getAll(manifest.shardKeys);
+    var cached = manifest.shardKeys.length ? cache.getAll(manifest.shardKeys) : {};
     var rows = [];
     for (var i = 0; i < manifest.shardKeys.length; i++) {
       var key = manifest.shardKeys[i];
@@ -1254,14 +1270,18 @@ function _readMasterProductionCache() {
       if (!Array.isArray(shardRows)) return null;
       rows = rows.concat(shardRows);
     }
-    return rows.length === manifest.rowCount ? rows : null;
+    if (rows.length !== manifest.rowCount) return null;
+    return {
+      rows: rows,
+      generatedAt: String(manifest.generatedAt || "")
+    };
   } catch (err) {
     return null;
   }
 }
 
 function _writeMasterProductionCache(rows) {
-  if (!rows || !rows.length) return false;
+  if (!Array.isArray(rows)) return false;
   var chunks = [];
   var current = [];
   var currentBytes = 2;
@@ -1280,7 +1300,7 @@ function _writeMasterProductionCache(rows) {
     currentBytes += addedBytes;
   }
   if (current.length) chunks.push(JSON.stringify(current));
-  if (!chunks.length || chunks.length > MASTER_RECEIVABLES_MAX_CACHE_CHUNKS) return false;
+  if (chunks.length > MASTER_RECEIVABLES_MAX_CACHE_CHUNKS) return false;
 
   try {
     var cache = CacheService.getScriptCache();
@@ -1299,6 +1319,7 @@ function _writeMasterProductionCache(rows) {
     }
     var manifestText = JSON.stringify({
       cacheVersion: MASTER_PRODUCTION_CACHE_VERSION,
+      generatedAt: new Date().toISOString(),
       rowCount: rows.length,
       shardKeys: shardKeys,
       shardBytes: shardBytes
@@ -1306,7 +1327,7 @@ function _writeMasterProductionCache(rows) {
     if (_masterReceivablesUtf8Bytes(manifestText) > MASTER_RECEIVABLES_CACHE_CHUNK_BYTES) return false;
     var manifestKey = baseKey + ":manifest";
     cache.remove(manifestKey);
-    cache.putAll(shardValues, MASTER_PRODUCTION_CACHE_TTL_SECONDS);
+    if (shardKeys.length) cache.putAll(shardValues, MASTER_PRODUCTION_CACHE_TTL_SECONDS);
     cache.put(manifestKey, manifestText, MASTER_PRODUCTION_CACHE_TTL_SECONDS);
     return true;
   } catch (err) {
@@ -1375,16 +1396,73 @@ function _buildMasterRows() {
   return out;
 }
 
-function _readMasterRows() {
-  var cached = _readMasterProductionCache();
-  if (cached) return cached;
-  var rows = _buildMasterRows();
-  _writeMasterProductionCache(rows);
-  return rows;
+function _readMasterRows(options) {
+  options = options || {};
+  var fresh = options.fresh === true;
+  var startedAt = Date.now();
+  var cacheLookupMs = 0;
+  try {
+    if (!fresh) {
+      var initialLookupStartedAt = Date.now();
+      var cached = _readMasterProductionCache();
+      cacheLookupMs = Date.now() - initialLookupStartedAt;
+      if (cached) {
+        _masterReceivablesLog({
+          event: "master-production-cache-load",
+          ok: true,
+          status: "hit",
+          rows: cached.rows.length,
+          cacheLookupMs: cacheLookupMs,
+          cacheRecheckMs: 0,
+          lockWaitMs: 0,
+          buildMs: 0,
+          cacheWriteMs: 0,
+          totalMs: Date.now() - startedAt
+        });
+        return cached.rows;
+      }
+    }
+
+    var buildStartedAt = Date.now();
+    var rows = _buildMasterRows();
+    var buildMs = Date.now() - buildStartedAt;
+    var cacheWriteStartedAt = Date.now();
+    var stored = _writeMasterProductionCache(rows);
+    var cacheWriteMs = Date.now() - cacheWriteStartedAt;
+    _masterReceivablesLog({
+      event: "master-production-cache-load",
+      ok: true,
+      status: fresh ? "refresh" : "miss",
+      rows: rows.length,
+      stored: stored,
+      cacheLookupMs: cacheLookupMs,
+      cacheRecheckMs: 0,
+      lockWaitMs: 0,
+      buildMs: buildMs,
+      cacheWriteMs: cacheWriteMs,
+      totalMs: Date.now() - startedAt
+    });
+    return rows;
+  } catch (err) {
+    var safeCode = err && /^[A-Z0-9_]{1,64}$/.test(String(err.code || ""))
+      ? String(err.code)
+      : "MASTER_PRODUCTION_READ_FAILED";
+    _masterReceivablesLog({
+      event: "master-production-cache-load",
+      ok: false,
+      status: "failed",
+      code: safeCode,
+      cacheLookupMs: cacheLookupMs,
+      cacheRecheckMs: 0,
+      lockWaitMs: 0,
+      totalMs: Date.now() - startedAt
+    });
+    throw err;
+  }
 }
 
-function _readMasterDay(dateYmd) {
-  var all = _readMasterRows();
+function _readMasterDay(dateYmd, options) {
+  var all = _readMasterRows(options);
   var out = [];
   for (var i = 0; i < all.length; i++) {
     if (all[i].date === dateYmd) out.push(all[i]);
@@ -1392,10 +1470,10 @@ function _readMasterDay(dateYmd) {
   return out;
 }
 
-function _readMasterRange(fromYmd, toYmd) {
+function _readMasterRange(fromYmd, toYmd, options) {
   var fromMs = fromYmd ? _ymdToDate(fromYmd).getTime() : 0;
   var toMs   = toYmd   ? _ymdToDate(toYmd).getTime()   : Date.now();
-  var all = _readMasterRows();
+  var all = _readMasterRows(options);
   var out = [];
   for (var i = 0; i < all.length; i++) {
     var t = _ymdToDate(all[i].date).getTime();
@@ -1493,6 +1571,27 @@ function _masterReceivablesFailure(code, publicMessage, details) {
   return err;
 }
 
+function _masterReceivablesCacheGeneratedForRequest(generatedAt, requestStartedAt) {
+  var generatedMs = new Date(String(generatedAt || "")).getTime();
+  return isFinite(generatedMs) && generatedMs >= requestStartedAt;
+}
+
+function _masterReceivablesCacheBusyFailure(cacheLookupMs, cacheRecheckMs, lockWaitMs, totalMs) {
+  return _masterReceivablesFailure(
+    "SERVICE_UNAVAILABLE",
+    "Partner data is currently refreshing. Please retry shortly.",
+    {
+      retryable: true,
+      timingMs: {
+        cacheLookup: Number(cacheLookupMs) || 0,
+        cacheRecheck: Number(cacheRecheckMs) || 0,
+        lockWait: Number(lockWaitMs) || 0,
+        total: Number(totalMs) || 0
+      }
+    }
+  );
+}
+
 function _masterReceivablesRequestId() {
   return Utilities.getUuid().replace(/-/g, "").slice(0, 12);
 }
@@ -1510,13 +1609,18 @@ function _masterReceivablesLog(event) {
   }
 }
 
+function _masterFreshRequested(e) {
+  var p = (e && e.parameter) || {};
+  var freshText = String(p.fresh || "").toLowerCase();
+  return freshText === "1" || freshText === "true";
+}
+
 function _parseMasterReceivablesQuery(e) {
   var p = (e && e.parameter) || {};
   var rawPageSize = p.pageSize;
   var paginated = rawPageSize !== undefined && rawPageSize !== null && String(rawPageSize) !== "";
-  var freshText = String(p.fresh || "").toLowerCase();
   var query = {
-    fresh: freshText === "1" || freshText === "true",
+    fresh: _masterFreshRequested(e),
     paginated: paginated,
     page: 1,
     pageSize: 0
@@ -1662,14 +1766,13 @@ function _readMasterReceivablesCache() {
       manifest.cacheVersion !== MASTER_RECEIVABLES_CACHE_VERSION ||
       !Array.isArray(manifest.shardKeys) ||
       !Array.isArray(manifest.shardBytes) ||
-      manifest.shardKeys.length < 1 ||
       manifest.shardKeys.length > MASTER_RECEIVABLES_MAX_CACHE_CHUNKS ||
       manifest.shardKeys.length !== manifest.shardBytes.length
     ) {
       return { dataset: null, lookupMs: Date.now() - startedAt };
     }
 
-    var cached = cache.getAll(manifest.shardKeys);
+    var cached = manifest.shardKeys.length ? cache.getAll(manifest.shardKeys) : {};
     var rows = [];
     for (var i = 0; i < manifest.shardKeys.length; i++) {
       var key = manifest.shardKeys[i];
@@ -1704,7 +1807,7 @@ function _readMasterReceivablesCache() {
 }
 
 function _writeMasterReceivablesCache(dataset) {
-  if (!dataset || !dataset.rows || !dataset.rows.length) return false;
+  if (!dataset || !Array.isArray(dataset.rows)) return false;
   var chunks = [];
   var current = [];
   var currentBytes = 2; // opening and closing brackets
@@ -1724,7 +1827,7 @@ function _writeMasterReceivablesCache(dataset) {
     currentBytes += addedBytes;
   }
   if (current.length) chunks.push(JSON.stringify(current));
-  if (!chunks.length || chunks.length > MASTER_RECEIVABLES_MAX_CACHE_CHUNKS) return false;
+  if (chunks.length > MASTER_RECEIVABLES_MAX_CACHE_CHUNKS) return false;
 
   try {
     var cache = CacheService.getScriptCache();
@@ -1759,7 +1862,7 @@ function _writeMasterReceivablesCache(dataset) {
 
     var manifestKey = baseKey + ":manifest";
     cache.remove(manifestKey);
-    cache.putAll(shardValues, MASTER_RECEIVABLES_CACHE_TTL_SECONDS);
+    if (shardKeys.length) cache.putAll(shardValues, MASTER_RECEIVABLES_CACHE_TTL_SECONDS);
     // Publish the manifest last. Readers ignore orphaned or incomplete shards.
     cache.put(manifestKey, manifestText, MASTER_RECEIVABLES_CACHE_TTL_SECONDS);
     return true;
@@ -1771,9 +1874,12 @@ function _writeMasterReceivablesCache(dataset) {
 
 function _loadMasterReceivablesDataset(options) {
   options = options || {};
+  var loadStartedAt = Date.now();
   var useCache = options.useCache !== false;
   var fresh = options.fresh === true;
   var cacheLookup = { dataset: null, lookupMs: 0 };
+  var cacheRecheckMs = 0;
+  var lockWaitMs = 0;
 
   if (useCache && !fresh) {
     cacheLookup = _readMasterReceivablesCache();
@@ -1785,7 +1891,9 @@ function _loadMasterReceivablesDataset(options) {
       };
       cacheLookup.dataset.timingMs = {
         cacheLookup: cacheLookup.lookupMs,
-        total: cacheLookup.lookupMs
+        cacheRecheck: 0,
+        lockWait: 0,
+        loadTotal: Date.now() - loadStartedAt
       };
       return cacheLookup.dataset;
     }
@@ -1795,31 +1903,56 @@ function _loadMasterReceivablesDataset(options) {
   var locked = false;
   var lockStartedAt = Date.now();
   if (useCache) {
-    try {
-      lock = LockService.getScriptLock();
-      locked = lock.tryLock(2500);
-    } catch (lockErr) {
-      locked = false;
+    var elapsedBeforeLockMs = Date.now() - loadStartedAt;
+    var remainingLockWaitMs = MASTER_RECEIVABLES_CACHE_LOCK_WAIT_MS - elapsedBeforeLockMs;
+    if (remainingLockWaitMs > 0) {
+      try {
+        lock = LockService.getScriptLock();
+        locked = lock.tryLock(remainingLockWaitMs);
+      } catch (lockErr) {
+        locked = false;
+      }
     }
+    lockWaitMs = Date.now() - lockStartedAt;
   }
 
   try {
-    if (locked && !fresh) {
+    // A normal request may reuse any valid winner. A fresh request bypasses the
+    // pre-existing cache and may only coalesce onto a dataset generated after
+    // this request began.
+    if (useCache) {
       var secondLookup = _readMasterReceivablesCache();
+      cacheRecheckMs = secondLookup.lookupMs;
       cacheLookup.lookupMs += secondLookup.lookupMs;
-      if (secondLookup.dataset) {
+      var reuseSecondLookup = secondLookup.dataset && (
+        !fresh || _masterReceivablesCacheGeneratedForRequest(secondLookup.dataset.generatedAt, loadStartedAt)
+      );
+      if (reuseSecondLookup) {
         secondLookup.dataset.cache = {
-          status: "hit-after-wait",
+          status: fresh ? "refresh-coalesced" : "hit-after-wait",
           ageMs: Math.max(0, Date.now() - new Date(secondLookup.dataset.generatedAt).getTime()),
           ttlSeconds: MASTER_RECEIVABLES_CACHE_TTL_SECONDS
         };
         secondLookup.dataset.timingMs = {
           cacheLookup: cacheLookup.lookupMs,
-          lockWait: Date.now() - lockStartedAt,
-          total: Date.now() - lockStartedAt + cacheLookup.lookupMs
+          cacheRecheck: cacheRecheckMs,
+          lockWait: lockWaitMs,
+          loadTotal: Date.now() - loadStartedAt
         };
         return secondLookup.dataset;
       }
+    }
+    var elapsedBeforeBuildMs = Date.now() - loadStartedAt;
+    if (
+      useCache &&
+      (!locked || elapsedBeforeBuildMs > MASTER_RECEIVABLES_MAX_WAIT_BEFORE_BUILD_MS)
+    ) {
+      throw _masterReceivablesCacheBusyFailure(
+        cacheLookup.lookupMs,
+        cacheRecheckMs,
+        lockWaitMs,
+        elapsedBeforeBuildMs
+      );
     }
 
     var dataset = _buildMasterReceivablesDataset();
@@ -1834,8 +1967,10 @@ function _loadMasterReceivablesDataset(options) {
     var builtTiming = dataset.buildTimingMs || {};
     for (var key in builtTiming) dataset.timingMs[key] = builtTiming[key];
     dataset.timingMs.cacheLookup = cacheLookup.lookupMs;
-    dataset.timingMs.lockWait = Date.now() - lockStartedAt;
+    dataset.timingMs.cacheRecheck = cacheRecheckMs;
+    dataset.timingMs.lockWait = lockWaitMs;
     dataset.timingMs.cacheWrite = Date.now() - cacheWriteStartedAt;
+    dataset.timingMs.loadTotal = Date.now() - loadStartedAt;
     return dataset;
   } finally {
     if (locked && lock) lock.releaseLock();
@@ -2527,7 +2662,15 @@ function _cashflowSheet() {
   return _requiredMasterSheet(MASTER_CASHFLOW_TAB, 20);
 }
 
-function _readCashflow(sheet) {
+function _readCashLedgerValues(sheet) {
+  var last = sheet.getLastRow();
+  if (last < CF_LEDGER_START_ROW) return [];
+  return sheet
+    .getRange(CF_LEDGER_START_ROW, 1, last - CF_LEDGER_START_ROW + 1, CF_LEDGER_WIDTH)
+    .getValues();
+}
+
+function _readCashflow(sheet, sharedLedgerValues) {
   var sh = sheet || _cashflowSheet();
 
   // One row read covers all five closing balances (E:O).
@@ -2554,12 +2697,9 @@ function _readCashflow(sheet) {
   // Read A:O once. The same rows provide both current-month CC withdrawals and
   // the most recent ledger date used by the summary.
   var ccDrawn = 0;
-  var lastRow = sh.getLastRow();
-  var ledgerValues = [];
-  if (lastRow >= CF_LEDGER_START_ROW) {
-    var n = lastRow - CF_LEDGER_START_ROW + 1;
-    ledgerValues = sh.getRange(CF_LEDGER_START_ROW, 1, n, CF_LEDGER_WIDTH).getValues();
-  }
+  var ledgerValues = sharedLedgerValues === undefined
+    ? _readCashLedgerValues(sh)
+    : sharedLedgerValues;
 
   var lastEntry = "";
   var maxMs = 0;
@@ -2604,12 +2744,12 @@ function _readCashflow(sheet) {
   };
 }
 
-function _readCashLedger(fromYmd, toYmd, accountKey, direction, sheet) {
+function _readCashLedger(fromYmd, toYmd, accountKey, direction, sheet, sharedLedgerValues) {
   var sh = sheet || _cashflowSheet();
-  var last = sh.getLastRow();
-  if (last < CF_LEDGER_START_ROW) return [];
-
-  var values = sh.getRange(CF_LEDGER_START_ROW, 1, last - CF_LEDGER_START_ROW + 1, CF_LEDGER_WIDTH).getValues();
+  var values = sharedLedgerValues === undefined
+    ? _readCashLedgerValues(sh)
+    : sharedLedgerValues;
+  if (!values.length) return [];
   var fromMs = fromYmd ? _ymdToDate(fromYmd).getTime() : 0;
   var toMs   = toYmd   ? _ymdToDate(toYmd).getTime() + 86399000 : Date.now();
 
@@ -2673,6 +2813,15 @@ function _readCashLedger(fromYmd, toYmd, accountKey, direction, sheet) {
 
   out.sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; });
   return out;
+}
+
+function _readCashReport(fromYmd, toYmd, accountKey, direction) {
+  var sh = _cashflowSheet();
+  var ledgerValues = _readCashLedgerValues(sh);
+  return {
+    cashflow: _readCashflow(sh, ledgerValues),
+    rows: _readCashLedger(fromYmd, toYmd, accountKey, direction, sh, ledgerValues)
+  };
 }
 
 /* ------------------------------ master workbook · capex (New Shed) ------------------------------ */

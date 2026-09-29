@@ -91,6 +91,8 @@ export interface SheetReadRequest<T> {
   validate: SheetValueValidator<T>;
   cacheVersion?: number;
   maxCacheAgeMs?: number;
+  /** Ask supported backends to bypass their short-lived cache for this read. */
+  fresh?: boolean;
 }
 
 export interface SheetPostOptions<T> {
@@ -119,6 +121,8 @@ class SheetRequestError extends Error {
 const inFlightReads = new Map<string, Promise<SheetReadResult<unknown>>>();
 let cacheInvalidationSerial = 0;
 const cacheInvalidationEpochs = new Map<string, number>();
+let readSequence = 0;
+const latestCacheWriteSequences = new Map<string, number>();
 
 export function isSheetJsonRecord(value: unknown): value is SheetJsonRecord {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -220,8 +224,12 @@ function cacheInvalidationEpoch(key: string): number {
   return epoch;
 }
 
-function requestUrl(params: Readonly<Record<string, SheetQueryValue>> = {}): string {
+function requestUrl(
+  params: Readonly<Record<string, SheetQueryValue>> = {},
+  fresh = false,
+): string {
   const queryParams = sortedParams(params);
+  if (fresh) queryParams.set("fresh", "1");
   const query = queryParams.toString();
   return query ? `/api/sheet?${query}` : "/api/sheet";
 }
@@ -447,11 +455,15 @@ async function fetchJsonWithRetry(
   throw lastError ?? new SheetRequestError(publicError("network", "Sheet request failed.", true));
 }
 
-async function performRead<T>(request: SheetReadRequest<T>): Promise<SheetReadResult<T>> {
+async function performRead<T>(
+  request: SheetReadRequest<T>,
+  requestSequence: number,
+  cacheIdentity: string,
+): Promise<SheetReadResult<T>> {
   const key = resourceKey(request);
   const invalidationEpochAtStart = cacheInvalidationEpoch(key);
   try {
-    const target = requestUrl(request.params);
+    const target = requestUrl(request.params, request.fresh);
     const body = await fetchJsonWithRetry(
       target,
       { method: "GET", headers: { Accept: "application/json" } },
@@ -471,8 +483,13 @@ async function performRead<T>(request: SheetReadRequest<T>): Promise<SheetReadRe
       );
     }
     const lastSyncedAt = Date.now();
-    if (cacheInvalidationEpoch(key) === invalidationEpochAtStart) {
+    const latestWriteSequence = latestCacheWriteSequences.get(cacheIdentity) ?? 0;
+    if (
+      cacheInvalidationEpoch(key) === invalidationEpochAtStart &&
+      requestSequence >= latestWriteSequence
+    ) {
       writeSheetCache(request, selected, lastSyncedAt);
+      latestCacheWriteSequences.set(cacheIdentity, requestSequence);
     }
     return { ok: true, data: selected, source: "network", lastSyncedAt, stale: false };
   } catch (error) {
@@ -497,10 +514,22 @@ async function performRead<T>(request: SheetReadRequest<T>): Promise<SheetReadRe
  * one fetch/retry operation; errors remain explicit unless validated LKG exists.
  */
 export function readSheet<T>(request: SheetReadRequest<T>): Promise<SheetReadResult<T>> {
-  const key = `GET:v${request.cacheVersion ?? 1}:${resourceKey(request)}`;
+  const cacheIdentity = `v${request.cacheVersion ?? 1}:${resourceKey(request)}`;
+  const freshKey = `GET:fresh:${cacheIdentity}`;
+  const normalKey = `GET:normal:${cacheIdentity}`;
+
+  // A normal read may safely share a stronger in-flight fresh request. A fresh
+  // read must never be downgraded to an older normal request.
+  if (!request.fresh) {
+    const fresh = inFlightReads.get(freshKey);
+    if (fresh) return fresh as Promise<SheetReadResult<T>>;
+  }
+
+  const key = request.fresh ? freshKey : normalKey;
   const existing = inFlightReads.get(key);
   if (existing) return existing as Promise<SheetReadResult<T>>;
-  const pending = performRead(request).finally(() => {
+  const requestSequence = ++readSequence;
+  const pending = performRead(request, requestSequence, cacheIdentity).finally(() => {
     if (inFlightReads.get(key) === pending) inFlightReads.delete(key);
   });
   inFlightReads.set(key, pending as Promise<SheetReadResult<unknown>>);

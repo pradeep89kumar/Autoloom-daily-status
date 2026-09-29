@@ -1,14 +1,20 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useNavigate } from "react-router";
 import { WarningCircle, Check, Clock, ArrowLeft } from "@phosphor-icons/react";
 import { LOOM_CATALOG } from "../../lib/looms";
+import { SheetDataStatus } from "../../components/SheetDataStatus";
+import { useSheetResource } from "../../hooks/useSheetResource";
 
 import {
-  fetchFullRows,
-  fetchLoadings,
-  fetchRecentRows,
+  fetchFullRowsResult,
+  fetchLoadingsResult,
+  fetchRecentRowsResult,
+  peekFullRowsCache,
+  peekLoadingsCache,
+  peekRecentRowsCache,
   type CapturedRow,
   type FullRow,
+  type RemoteLoading,
 } from "../../lib/sheetSync";
 import { detectPendingSlots } from "../../lib/pending";
 import { addDays, currentShift, shiftWindow, shortDate, ymd } from "../../lib/shift";
@@ -22,29 +28,60 @@ import {
 export function LoomFloor() {
   const navigate = useNavigate();
 
-  const [rows, setRows] = useState<CapturedRow[] | null>(null);
-  const [fullRows, setFullRows] = useState<FullRow[]>([]);
-  const [loadings, setLoadings] = useState<LoadingEvent[]>([]);
-  const [loading, setLoading] = useState(true);
-  const refetch = () => {
-    setLoading(true);
-    const startedAt = Date.now();
-    Promise.all([fetchRecentRows(), fetchFullRows(), fetchLoadings()]).then(
-      ([r, f, l]) => {
-        setRows(r);
-        setFullRows(f);
-        setLoadings(mergeLoadings(l));
-        const wait = Math.max(0, 3000 - (Date.now() - startedAt));
-        setTimeout(() => setLoading(false), wait);
-      },
-    );
+  const recentResource = useSheetResource<CapturedRow[]>({
+    resourceKey: "supervisor:loom-floor:recent-rows",
+    load: fetchRecentRowsResult,
+    peek: peekRecentRowsCache,
+  });
+  const fullResource = useSheetResource<FullRow[]>({
+    resourceKey: "supervisor:loom-floor:full-rows",
+    load: fetchFullRowsResult,
+    peek: peekFullRowsCache,
+  });
+  const loadingsResource = useSheetResource<RemoteLoading[]>({
+    resourceKey: "supervisor:loom-floor:loadings",
+    load: fetchLoadingsResult,
+    peek: peekLoadingsCache,
+  });
+
+  // A complete validated last-known-good triplet may render immediately, but it
+  // remains read-only until all three live reads succeed. These datasets jointly
+  // decide whether a production entry is safe, so a missing one must never be
+  // treated as an actionable empty array.
+  const rows = recentResource.data;
+  const fullRows = fullResource.data;
+  const loadings = useMemo<LoadingEvent[] | null>(
+    () => loadingsResource.data ? mergeLoadings(loadingsResource.data) : null,
+    [loadingsResource.data],
+  );
+  const hasCompleteData = rows !== null && fullRows !== null && loadings !== null;
+  const syncing =
+    recentResource.loading || recentResource.refreshing ||
+    fullResource.loading || fullResource.refreshing ||
+    loadingsResource.loading || loadingsResource.refreshing;
+  const loading = !hasCompleteData && syncing;
+  const syncError = recentResource.error ?? fullResource.error ?? loadingsResource.error;
+  const syncWarning = recentResource.warning ?? fullResource.warning ?? loadingsResource.warning;
+  const syncTimes = [
+    recentResource.lastSyncedAt,
+    fullResource.lastSyncedAt,
+    loadingsResource.lastSyncedAt,
+  ].filter((value): value is number => value !== null);
+  const lastSyncedAt = syncTimes.length === 3 ? Math.min(...syncTimes) : null;
+  const liveReady = hasCompleteData && [recentResource, fullResource, loadingsResource].every(
+    (resource) =>
+      resource.source === "network" &&
+      !resource.stale &&
+      !resource.loading &&
+      !resource.refreshing &&
+      !resource.error &&
+      !resource.warning,
+  );
+  const retryAll = () => {
+    recentResource.refresh();
+    fullResource.refresh();
+    loadingsResource.refresh();
   };
-  useEffect(() => {
-    refetch();
-    const onFocus = () => refetch();
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, []);
 
   // Build a set of looms that already have a row for the current shift+date.
   const cs = useMemo(() => currentShift(), []);
@@ -88,6 +125,7 @@ export function LoomFloor() {
     [cs],
   );
   const needsLoading = (loomName: string) => {
+    if (!fullRows || !loadings) return false;
     const s = loadingStatusForTarget(loomName, targetForStatus, fullRows, loadings);
     return s.kind === "completed-needs-loading";
   };
@@ -170,9 +208,18 @@ export function LoomFloor() {
         </button>
       </div>
 
+      <SheetDataStatus
+        error={syncError}
+        warning={syncWarning}
+        refreshing={syncing}
+        lastSyncedAt={lastSyncedAt}
+        onRetry={retryAll}
+        className="mx-4 mt-3"
+      />
+
       {loading && <LoomFloorSkeleton />}
 
-      {!loading && (
+      {hasCompleteData && (
         <>
       {/* Progress strip — reflects the default target shift */}
       {target && (
@@ -225,26 +272,25 @@ export function LoomFloor() {
               ? "Cut-off passed — backfill these entries."
               : `Cut-off ${fmtTime(targetWindow.cutoff)}.`}
           </p>
-          <div className="grid grid-cols-4 gap-2">
-            {LOOM_CATALOG.map((l) => {
-              const logged = targetLoggedSet.has(l.name.toUpperCase());
-              const runout = needsLoading(l.name);
-              const disabled = logged || runout;
-              const lateLoading = (() => {
-                const ld = latestLoading(l.name, loadings);
-                if (!ld || !targetWindow) return null;
-                return new Date(ld.capturedAt).getTime() > targetWindow.start.getTime() ? ld : null;
-              })();
-              return (
-                <button
-                  key={l.id}
-                  type="button"
-                  disabled={logged}
-                  onClick={() => {
-                    if (logged) return;
-                    if (runout) {
-                      navigate(`/supervisor/new-loading?loom=${l.id}`);
-                      return;
+            <div className="grid grid-cols-4 gap-2">
+              {LOOM_CATALOG.map((l) => {
+                const logged = targetLoggedSet.has(l.name.toUpperCase());
+                const runout = needsLoading(l.name);
+                const lateLoading = (() => {
+                  const ld = latestLoading(l.name, loadings ?? []);
+                  if (!ld || !targetWindow) return null;
+                  return new Date(ld.capturedAt).getTime() > targetWindow.start.getTime() ? ld : null;
+                })();
+                return (
+                  <button
+                    key={l.id}
+                    type="button"
+                    disabled={logged || !liveReady}
+                    onClick={() => {
+                      if (logged || !liveReady) return;
+                      if (runout) {
+                        navigate(`/supervisor/new-loading?loom=${l.id}`);
+                        return;
                     }
                     navigate(
                       `/supervisor/production/${l.id}?date=${ymd(target.date)}&shift=${target.shift}`,
@@ -258,8 +304,8 @@ export function LoomFloor() {
                         : targetLate
                           ? "border-[var(--color-status-red)] bg-[color-mix(in_srgb,var(--color-status-red)_6%,white)] text-[var(--color-status-red)]"
                           : "border-[var(--color-text-primary)] bg-white hover:bg-gray-50"
-                  }`}
-                >
+                  } ${!liveReady ? "cursor-not-allowed opacity-60" : ""}`}
+                  >
                   <span className="inline-flex items-center gap-1">
                     {l.name}
                     {logged && <Check className="w-3.5 h-3.5" weight="bold" />}
@@ -296,12 +342,16 @@ export function LoomFloor() {
           {pendingShifts.map((s) => (
             <button
               key={`${ymd(s.date)}|${s.shift}`}
-              onClick={() => navigate("/supervisor/pending")}
+              type="button"
+              disabled={!liveReady}
+              onClick={() => {
+                if (liveReady) navigate("/supervisor/pending");
+              }}
               className={`w-full text-left flex items-center gap-3 px-3.5 py-3 rounded-xl border ${
                 s.status === "late"
                   ? "border-[var(--color-status-red)] bg-[color-mix(in_srgb,var(--color-status-red)_6%,white)]"
                   : "border-[var(--color-border-hairline)] bg-gray-50"
-              }`}
+              } ${!liveReady ? "cursor-not-allowed opacity-60" : ""}`}
             >
               {s.status === "late" ? (
                 <WarningCircle className="w-4 h-4 text-[var(--color-status-red)] shrink-0" weight="fill" />

@@ -27,7 +27,7 @@ export interface SheetResource<T> extends ResourceState<T> {
 
 interface UseSheetResourceOptions<T> {
   resourceKey: string;
-  load: () => Promise<SheetReadResult<T>>;
+  load: (options: { fresh: boolean }) => Promise<SheetReadResult<T>>;
   peek?: () => SheetCacheSnapshot<T> | null;
   refreshOnResume?: boolean;
 }
@@ -67,7 +67,7 @@ export function useSheetResource<T>({
     initialState(peek?.() ?? null),
   );
 
-  const run = useCallback(async () => {
+  const run = useCallback(async (fresh = false) => {
     const keyAtStart = activeKeyRef.current;
     const serial = ++requestSerialRef.current;
     setState((current) => ({
@@ -77,7 +77,7 @@ export function useSheetResource<T>({
       error: null,
     }));
 
-    const result = await loadRef.current();
+    const result = await loadRef.current({ fresh });
     if (activeKeyRef.current !== keyAtStart || requestSerialRef.current !== serial) return;
 
     if (result.ok) {
@@ -138,7 +138,7 @@ export function useSheetResource<T>({
 
   const refresh = useCallback(() => {
     lastAutoRefreshRef.current = Date.now();
-    void run();
+    void run(true);
   }, [run]);
 
   return {

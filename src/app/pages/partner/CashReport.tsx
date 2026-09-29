@@ -8,11 +8,9 @@ import {
 } from "@phosphor-icons/react";
 import { buildCashReportPdf, cashReportFilename } from "../../lib/cashReportPdf";
 import {
-  fetchCashflowResult,
-  fetchCashLedgerResult,
-  peekCashflowCache,
-  peekCashLedgerCache,
-  type CashflowData,
+  fetchCashReportResult,
+  peekCashReportCache,
+  type CashReportData,
   type CashLedgerEntry,
 } from "../../lib/sheetSync";
 import { SheetDataStatus } from "../../components/SheetDataStatus";
@@ -128,31 +126,22 @@ export function PartnerCashReport() {
     () => ({ from: ymd(period.start), to: ymd(period.periodEnd) }),
     [period],
   );
-  const ledgerResource = useSheetResource<CashLedgerEntry[]>({
+  const reportResource = useSheetResource<CashReportData>({
     resourceKey: `cash-report:${ledgerFilter.from}:${ledgerFilter.to}`,
-    load: () => fetchCashLedgerResult(ledgerFilter),
-    peek: () => peekCashLedgerCache(ledgerFilter),
-  });
-  const cashflowResource = useSheetResource<CashflowData>({
-    resourceKey: `cash-report:cashflow:${monthKey}`,
-    load: fetchCashflowResult,
-    peek: peekCashflowCache,
+    load: () => fetchCashReportResult(ledgerFilter),
+    peek: () => peekCashReportCache(ledgerFilter),
   });
 
-  const ledger = ledgerResource.data;
-  const cashflow = cashflowResource.data;
-  const loading = ledgerResource.loading || cashflowResource.loading;
-  const refreshing = ledgerResource.refreshing || cashflowResource.refreshing;
-  const hasCompleteData = ledger !== null && cashflow !== null;
+  const ledger = reportResource.data?.rows ?? null;
+  const cashflow = reportResource.data?.cashflow ?? null;
+  const loading = reportResource.loading;
+  const refreshing = reportResource.refreshing;
+  const hasCompleteData = reportResource.data !== null;
   const canExport =
     hasCompleteData &&
-    ledgerResource.canUseForExport &&
-    cashflowResource.canUseForExport &&
+    reportResource.canUseForExport &&
     !refreshing;
-  const syncedTimes = [ledgerResource.lastSyncedAt, cashflowResource.lastSyncedAt].filter(
-    (value): value is number => value !== null,
-  );
-  const lastSyncedAt = syncedTimes.length === 2 ? Math.min(...syncedTimes) : null;
+  const lastSyncedAt = reportResource.lastSyncedAt;
   const generatedAtDate = useMemo(
     () => (lastSyncedAt ? new Date(lastSyncedAt) : null),
     [lastSyncedAt],
@@ -307,12 +296,11 @@ export function PartnerCashReport() {
   };
 
   const retryData = () => {
-    ledgerResource.refresh();
-    cashflowResource.refresh();
+    reportResource.refresh();
   };
 
-  const syncError = ledgerResource.error ?? cashflowResource.error;
-  const syncWarning = ledgerResource.warning ?? cashflowResource.warning;
+  const syncError = reportResource.error;
+  const syncWarning = reportResource.warning;
 
   return (
     <div className="min-h-screen bg-white text-black">

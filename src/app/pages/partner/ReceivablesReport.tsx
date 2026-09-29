@@ -88,8 +88,10 @@ function downloadFile(file: File) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
 }
 
-async function loadReceivablesReport(): Promise<SheetReadResult<ReceivableRow[]>> {
-  const result = await fetchMasterReceivablesResult();
+async function loadReceivablesReport(
+  { fresh }: { fresh: boolean },
+): Promise<SheetReadResult<ReceivableRow[]>> {
+  const result = await fetchMasterReceivablesResult({ fresh });
   if (!result.ok) return { ok: false, error: result.error };
   return {
     ok: true,

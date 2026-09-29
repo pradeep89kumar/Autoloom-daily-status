@@ -56,7 +56,7 @@ export function PartnerDay() {
   const selectedDate = ymd(date);
   const dayResource = useSheetResource({
     resourceKey: `partner:day:${selectedDate}`,
-    load: () => fetchMasterDayResult(selectedDate),
+    load: ({ fresh }) => fetchMasterDayResult(selectedDate, { fresh }),
     peek: () => peekMasterDayCache(selectedDate),
   });
   const { data: rows, loading } = dayResource;

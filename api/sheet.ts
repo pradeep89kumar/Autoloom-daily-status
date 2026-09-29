@@ -25,12 +25,13 @@ const SUPERVISOR_GET_PARAMS: Record<string, readonly string[]> = {
 };
 
 const PARTNER_GET_PARAMS: Record<string, readonly string[]> = {
-  "master-day": ["date"],
-  "master-range": ["from", "to"],
+  "master-day": ["date", "fresh"],
+  "master-range": ["from", "to", "fresh"],
   "master-orders": [],
-  "master-receivables": [],
+  "master-receivables": ["fresh"],
   cashflow: [],
   "cashflow-ledger": ["from", "to", "account", "direction"],
+  "cashflow-report": ["from", "to", "account", "direction"],
   capex: ["project"],
 };
 
@@ -70,6 +71,7 @@ function safeQueryValue(name: string, value: string): boolean {
   if (value.length > 160 || /[\u0000-\u001f]/.test(value)) return false;
   if (name === "date" || name === "from" || name === "to") return value === "" || /^\d{4}-\d{2}-\d{2}$/.test(value);
   if (name === "direction") return value === "" || value === "in" || value === "out";
+  if (name === "fresh") return value === "1" || value === "true";
   if (name === "account") return value === "" || ["tmb", "iobCa", "cashbookApp", "cash", "iobCc"].includes(value);
   return true;
 }
@@ -83,6 +85,20 @@ async function readJsonResponse(response: Response): Promise<Record<string, unkn
   } catch {
     return null;
   }
+}
+
+function isJsonRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isCompatibleCashflowReportBody(body: Record<string, unknown>): boolean {
+  // Explicit backend failures are safe to forward. A successful combined
+  // response must carry its own report envelope; the older Apps Script instead
+  // falls through to the default `{ ok: true, rows: [...] }` response for an
+  // unknown mode, which must never be exposed as a cash report.
+  if (body.ok !== true) return true;
+  if (!isJsonRecord(body.report)) return false;
+  return isJsonRecord(body.report.cashflow) && Array.isArray(body.report.rows);
 }
 
 async function upstreamFetch(
@@ -138,6 +154,9 @@ async function proxyGet(request: Request, role: AppRole, config: { url: URL; tok
     if (!response.ok || !body) return jsonResponse({ ok: false, error: "upstream_invalid_response" }, 502);
     if (body.ok !== true && body.error === "unauthorized") {
       return jsonResponse({ ok: false, error: "upstream_auth_failed" }, 502);
+    }
+    if (mode === "cashflow-report" && !isCompatibleCashflowReportBody(body)) {
+      return jsonResponse({ ok: false, error: "upstream_incompatible_response" }, 409);
     }
     return jsonResponse(body);
   } catch (error) {

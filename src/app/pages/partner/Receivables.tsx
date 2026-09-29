@@ -32,8 +32,10 @@ type InvoiceMode = "outstanding" | "paid";
 type InvoiceFilter = "pending" | "overdue" | "partial";
 type InvoiceSortDirection = "desc" | "asc";
 
-async function loadReceivablesResult(): Promise<SheetReadResult<ReceivableRow[]>> {
-  const result = await fetchMasterReceivablesResult();
+async function loadReceivablesResult(
+  { fresh }: { fresh: boolean },
+): Promise<SheetReadResult<ReceivableRow[]>> {
+  const result = await fetchMasterReceivablesResult({ fresh });
   if (!result.ok) return { ok: false, error: result.error };
   return {
     ok: true,

@@ -143,36 +143,42 @@ export function PartnerTrend() {
   }, []);
   const recentFrom = ymd(dates[0]);
   const recentTo = ymd(dates[dates.length - 1]);
-  const recentResource = useSheetResource<MasterRangeRow[]>({
-    resourceKey: `partner:trend:14d:${recentFrom}:${recentTo}`,
-    load: () => fetchMasterRangeResult(recentFrom, recentTo),
-    peek: () => peekMasterRangeCache(recentFrom, recentTo),
-  });
   const monthFrom = ymd(monthStart);
   const monthTo = ymd(new Date());
-  const mtdResource = useSheetResource<MasterRangeRow[]>({
-    resourceKey: `partner:trend:mtd:${monthFrom}:${monthTo}`,
-    load: () => fetchMasterRangeResult(monthFrom, monthTo),
-    peek: () => peekMasterRangeCache(monthFrom, monthTo),
+  // The recent and month-to-date ranges usually overlap. Fetch their union
+  // once, then derive both views locally so opening Trend cannot trigger two
+  // simultaneous production-sheet scans.
+  const rangeFrom = recentFrom < monthFrom ? recentFrom : monthFrom;
+  const rangeTo = recentTo > monthTo ? recentTo : monthTo;
+  const rangeResource = useSheetResource<MasterRangeRow[]>({
+    resourceKey: `partner:trend:${rangeFrom}:${rangeTo}`,
+    load: ({ fresh }) => fetchMasterRangeResult(rangeFrom, rangeTo, { fresh }),
+    peek: () => peekMasterRangeCache(rangeFrom, rangeTo),
   });
 
   // Rows copied forward before the new looms physically started must not skew
   // either the trend window or the month-to-date target calculations.
   const rows = useMemo(
     () =>
-      recentResource.data?.filter(
-        (row) => !(isNewLoom(row.loom) && row.date < NEW_LOOM_START),
+      rangeResource.data?.filter(
+        (row) =>
+          row.date >= recentFrom &&
+          row.date <= recentTo &&
+          !(isNewLoom(row.loom) && row.date < NEW_LOOM_START),
       ) ?? null,
-    [recentResource.data],
+    [rangeResource.data, recentFrom, recentTo],
   );
   const mtdRows = useMemo(
     () =>
-      mtdResource.data?.filter(
-        (row) => !(isNewLoom(row.loom) && row.date < NEW_LOOM_START),
+      rangeResource.data?.filter(
+        (row) =>
+          row.date >= monthFrom &&
+          row.date <= monthTo &&
+          !(isNewLoom(row.loom) && row.date < NEW_LOOM_START),
       ) ?? null,
-    [mtdResource.data],
+    [rangeResource.data, monthFrom, monthTo],
   );
-  const loading = recentResource.loading;
+  const loading = rangeResource.loading;
 
   const grid = useMemo(() => buildGrid(rows || []), [rows]);
 
@@ -330,24 +336,16 @@ export function PartnerTrend() {
       </div>
 
       <SheetDataStatus
-        error={recentResource.error}
-        warning={recentResource.warning}
-        refreshing={recentResource.refreshing}
-        lastSyncedAt={recentResource.lastSyncedAt}
-        onRetry={recentResource.refresh}
-        className="mb-3"
-      />
-      <SheetDataStatus
-        error={mtdResource.error}
-        warning={mtdResource.warning}
-        refreshing={mtdResource.refreshing && !recentResource.refreshing}
-        lastSyncedAt={mtdResource.lastSyncedAt}
-        onRetry={mtdResource.refresh}
+        error={rangeResource.error}
+        warning={rangeResource.warning}
+        refreshing={rangeResource.refreshing}
+        lastSyncedAt={rangeResource.lastSyncedAt}
+        onRetry={rangeResource.refresh}
         className="mb-3"
       />
 
       {/* Monthly target tracker — verdict-first */}
-      {mtdResource.loading ? (
+      {rangeResource.loading ? (
         <div className="h-56 bg-black/[0.04] rounded-xl animate-pulse mb-5" />
       ) : targetStats ? (
         <MonthTargetCard stats={targetStats} monthStart={monthStart} momentum={momentum} loomStatus={loomStatus} />
@@ -362,7 +360,7 @@ export function PartnerTrend() {
         <Chevron open={showDetail} />
       </button>
 
-      {!showDetail ? null : recentResource.error && rows === null ? null : (
+      {!showDetail ? null : rangeResource.error && rows === null ? null : (
       <div className="mt-5">
       <div className="mb-4">
         <h2 className="text-[18px] font-bold mb-1 text-[var(--color-text-primary)]">கடந்த {DAYS} நாட்கள்</h2>

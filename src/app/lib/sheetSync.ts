@@ -108,8 +108,20 @@ export function clearAllSheetCache(): void {
   clearSheetCache();
 }
 
-export function submitToSheetResult(p: SheetPayload): Promise<SheetMutationResult<SheetJsonRecord>> {
-  return postSheet(p, { keepalive: p.kind !== "design" });
+function clearSupervisorOperationalCaches(kind: "production" | "loading" | "edit"): void {
+  if (kind === "production") clearSheetCache("supervisor:recent-rows");
+  if (kind === "production" || kind === "edit") clearSheetCache("supervisor:full-rows");
+  if (kind === "loading") clearSheetCache("supervisor:loadings");
+}
+
+export async function submitToSheetResult(
+  p: SheetPayload,
+): Promise<SheetMutationResult<SheetJsonRecord>> {
+  const result = await postSheet(p, { keepalive: p.kind !== "design" });
+  if (result.ok && (p.kind === "production" || p.kind === "loading")) {
+    clearSupervisorOperationalCaches(p.kind);
+  }
+  return result;
 }
 
 export async function submitToSheet(p: SheetPayload): Promise<{ ok: boolean; verified: boolean }> {
@@ -193,6 +205,10 @@ function recentRowsRequest(): SheetReadRequest<CapturedRow[]> {
   };
 }
 
+export function peekRecentRowsCache(): SheetCacheSnapshot<CapturedRow[]> | null {
+  return peekSheetCache(recentRowsRequest());
+}
+
 export function fetchRecentRowsResult(): Promise<SheetReadResult<CapturedRow[]>> {
   return readSheet(recentRowsRequest());
 }
@@ -256,6 +272,10 @@ function fullRowsRequest(): SheetReadRequest<FullRow[]> {
   };
 }
 
+export function peekFullRowsCache(): SheetCacheSnapshot<FullRow[]> | null {
+  return peekSheetCache(fullRowsRequest());
+}
+
 export function fetchFullRowsResult(): Promise<SheetReadResult<FullRow[]>> {
   return readSheet(fullRowsRequest());
 }
@@ -297,6 +317,10 @@ function loadingsRequest(): SheetReadRequest<RemoteLoading[]> {
     validate: (value): value is RemoteLoading[] => isSheetArrayOf(value, isRemoteLoading),
     maxCacheAgeMs: DEFAULT_ROWS_CACHE_MS,
   };
+}
+
+export function peekLoadingsCache(): SheetCacheSnapshot<RemoteLoading[]> | null {
+  return peekSheetCache(loadingsRequest());
 }
 
 export function fetchLoadingsResult(): Promise<SheetReadResult<RemoteLoading[]>> {
@@ -377,8 +401,12 @@ export interface EditPayload {
   note?: string;
 }
 
-export function editProductionRowResult(p: EditPayload): Promise<SheetMutationResult<SheetJsonRecord>> {
-  return postSheet(p, { keepalive: true });
+export async function editProductionRowResult(
+  p: EditPayload,
+): Promise<SheetMutationResult<SheetJsonRecord>> {
+  const result = await postSheet(p, { keepalive: true });
+  if (result.ok) clearSupervisorOperationalCaches("edit");
+  return result;
 }
 
 export async function editProductionRow(p: EditPayload): Promise<{ ok: boolean; verified: boolean }> {
@@ -457,20 +485,29 @@ function isMasterRangeRow(value: unknown): value is MasterRangeRow {
   );
 }
 
-function masterDayRequest(date: string): SheetReadRequest<MasterRow[]> {
+function masterDayRequest(
+  date: string,
+  options: { fresh?: boolean } = {},
+): SheetReadRequest<MasterRow[]> {
   return {
     key: `${PARTNER_CACHE_PREFIX}master-day`,
     params: { mode: "master-day", date },
+    fresh: options.fresh,
     select: selectRows,
     validate: (value): value is MasterRow[] => isSheetArrayOf(value, isMasterRow),
     maxCacheAgeMs: DEFAULT_ROWS_CACHE_MS,
   };
 }
 
-function masterRangeRequest(from: string, to: string): SheetReadRequest<MasterRangeRow[]> {
+function masterRangeRequest(
+  from: string,
+  to: string,
+  options: { fresh?: boolean } = {},
+): SheetReadRequest<MasterRangeRow[]> {
   return {
     key: `${PARTNER_CACHE_PREFIX}master-range`,
     params: { mode: "master-range", from, to },
+    fresh: options.fresh,
     select: selectRows,
     validate: (value): value is MasterRangeRow[] => isSheetArrayOf(value, isMasterRangeRow),
     maxCacheAgeMs: DEFAULT_ROWS_CACHE_MS,
@@ -485,16 +522,23 @@ export function peekMasterRangeCache(from: string, to: string): SheetCacheSnapsh
   return peekSheetCache(masterRangeRequest(from, to));
 }
 
-export function fetchMasterDayResult(date: string): Promise<SheetReadResult<MasterRow[]>> {
-  return readSheet(masterDayRequest(date));
+export function fetchMasterDayResult(
+  date: string,
+  options: { fresh?: boolean } = {},
+): Promise<SheetReadResult<MasterRow[]>> {
+  return readSheet(masterDayRequest(date, options));
 }
 
 export async function fetchMasterDay(date: string): Promise<MasterRow[]> {
   return legacyValue(await fetchMasterDayResult(date), [], "fetchMasterDay");
 }
 
-export function fetchMasterRangeResult(from: string, to: string): Promise<SheetReadResult<MasterRangeRow[]>> {
-  return readSheet(masterRangeRequest(from, to));
+export function fetchMasterRangeResult(
+  from: string,
+  to: string,
+  options: { fresh?: boolean } = {},
+): Promise<SheetReadResult<MasterRangeRow[]>> {
+  return readSheet(masterRangeRequest(from, to, options));
 }
 
 export async function fetchMasterRange(from: string, to: string): Promise<MasterRangeRow[]> {
@@ -585,10 +629,13 @@ function selectMasterReceivablesRows(body: SheetJsonRecord): unknown {
   return body.rows;
 }
 
-function masterReceivablesRequest(): SheetReadRequest<ReceivableRow[]> {
+function masterReceivablesRequest(
+  options: { fresh?: boolean } = {},
+): SheetReadRequest<ReceivableRow[]> {
   return {
     key: `${PARTNER_CACHE_PREFIX}master-receivables`,
     params: { mode: "master-receivables" },
+    fresh: options.fresh,
     select: selectMasterReceivablesRows,
     validate: (value): value is ReceivableRow[] => isSheetArrayOf(value, isReceivableRow),
     // v2 discards any empty LKG written before response health was enforced.
@@ -612,8 +659,10 @@ export function peekMasterReceivablesCache(): SheetCacheSnapshot<ReceivableRow[]
   return peekSheetCache(masterReceivablesRequest());
 }
 
-export async function fetchMasterReceivablesResult(): Promise<ReceivablesFetchResult> {
-  const result = await readSheet(masterReceivablesRequest());
+export async function fetchMasterReceivablesResult(
+  options: { fresh?: boolean } = {},
+): Promise<ReceivablesFetchResult> {
+  const result = await readSheet(masterReceivablesRequest(options));
   if (!result.ok) return { ok: false, rows: [], error: result.error };
   return {
     ok: true,
@@ -1094,6 +1143,111 @@ export function fetchCashLedgerResult(f: CashLedgerFilter = {}): Promise<SheetRe
 
 export async function fetchCashLedger(f: CashLedgerFilter = {}): Promise<CashLedgerEntry[]> {
   return legacyValue(await fetchCashLedgerResult(f), [], "fetchCashLedger");
+}
+
+export interface CashReportData {
+  cashflow: CashflowData;
+  rows: CashLedgerEntry[];
+}
+
+function isCashReportData(value: unknown): value is CashReportData {
+  return (
+    isSheetJsonRecord(value) &&
+    isCashflowData(value.cashflow) &&
+    isSheetArrayOf(value.rows, isCashLedgerEntry)
+  );
+}
+
+function cashReportRequest(f: CashLedgerFilter = {}): SheetReadRequest<CashReportData> {
+  return {
+    key: `${PARTNER_CACHE_PREFIX}cashflow-report`,
+    params: {
+      mode: "cashflow-report",
+      from: f.from,
+      to: f.to,
+      account: f.account,
+      direction: f.direction,
+    },
+    select: (body) => body.report,
+    validate: isCashReportData,
+    maxCacheAgeMs: DEFAULT_ROWS_CACHE_MS,
+  };
+}
+
+function hasIncompatibleCashReportResponse(result: SheetReadResult<CashReportData>): boolean {
+  const problem = result.ok ? result.warning : result.error;
+  return problem?.code === "upstream_incompatible_response";
+}
+
+function combineLegacyCashReportResults(
+  cashflowResult: SheetReadResult<CashflowData>,
+  ledgerResult: SheetReadResult<CashLedgerEntry[]>,
+): SheetReadResult<CashReportData> {
+  if (!cashflowResult.ok) return cashflowResult;
+  if (!ledgerResult.ok) return ledgerResult;
+
+  const source =
+    cashflowResult.source === "network" && ledgerResult.source === "network"
+      ? "network"
+      : "cache";
+  const warning = cashflowResult.warning ?? ledgerResult.warning;
+  const combined: SheetReadResult<CashReportData> = {
+    ok: true,
+    data: { cashflow: cashflowResult.data, rows: ledgerResult.data },
+    source,
+    lastSyncedAt: Math.min(cashflowResult.lastSyncedAt, ledgerResult.lastSyncedAt),
+    stale: source === "cache" || cashflowResult.stale || ledgerResult.stale,
+  };
+  if (warning) combined.warning = warning;
+  return combined;
+}
+
+/**
+ * Prefer the atomic combined endpoint. During the Apps Script rollout only,
+ * the proxy can explicitly report that the deployed script does not recognise
+ * the new mode; in that case rebuild the same validated shape from the two
+ * existing Partner-only endpoints.
+ */
+export async function fetchCashReportResult(
+  f: CashLedgerFilter = {},
+): Promise<SheetReadResult<CashReportData>> {
+  const combinedResult = await readSheet(cashReportRequest(f));
+  if (!hasIncompatibleCashReportResponse(combinedResult)) return combinedResult;
+
+  const [cashflowResult, ledgerResult] = await Promise.all([
+    fetchCashflowResult(),
+    fetchCashLedgerResult(f),
+  ]);
+  const legacyResult = combineLegacyCashReportResults(cashflowResult, ledgerResult);
+
+  // A clean pair of legacy network responses is fully current and may be used
+  // for PDF export. Otherwise retain the newest complete validated LKG rather
+  // than ever joining a partial response.
+  if (!legacyResult.ok) return combinedResult.ok ? combinedResult : legacyResult;
+  if (!combinedResult.ok) return legacyResult;
+  return legacyResult.lastSyncedAt >= combinedResult.lastSyncedAt
+    ? legacyResult
+    : combinedResult;
+}
+
+export function peekCashReportCache(
+  f: CashLedgerFilter = {},
+): SheetCacheSnapshot<CashReportData> | null {
+  const combined = peekSheetCache(cashReportRequest(f));
+  const cashflow = peekCashflowCache();
+  const ledger = peekCashLedgerCache(f);
+  const legacy = cashflow && ledger
+    ? {
+        data: { cashflow: cashflow.data, rows: ledger.data },
+        source: "cache" as const,
+        lastSyncedAt: Math.min(cashflow.lastSyncedAt, ledger.lastSyncedAt),
+        stale: true as const,
+      }
+    : null;
+
+  if (!combined) return legacy;
+  if (!legacy) return combined;
+  return legacy.lastSyncedAt >= combined.lastSyncedAt ? legacy : combined;
 }
 
 /* ------------------------------ capex (New Shed Expenses) ------------------------------ */
