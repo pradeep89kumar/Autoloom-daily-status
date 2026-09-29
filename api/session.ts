@@ -8,7 +8,7 @@ import {
   sameOriginRequest,
   sessionCookie,
   type AppRole,
-} from "../server/auth";
+} from "../server/auth.js";
 
 const MAX_LOGIN_BODY_BYTES = 1_024;
 

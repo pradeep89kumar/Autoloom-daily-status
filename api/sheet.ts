@@ -4,7 +4,7 @@ import {
   readSessionRole,
   sameOriginRequest,
   type AppRole,
-} from "../server/auth";
+} from "../server/auth.js";
 
 declare const process: { env: Record<string, string | undefined> };
 
