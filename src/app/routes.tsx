@@ -11,7 +11,7 @@ import { Logs } from "./pages/supervisor/Logs";
 import { BeamRegister } from "./pages/supervisor/BeamRegister";
 import { DesignsList, DesignDetail } from "./pages/supervisor/Designs";
 import { DesignCapture } from "./pages/supervisor/DesignCapture";
-import { PinGate } from "./pages/partner/PinGate";
+import { PinGate, SupervisorPinGate } from "./pages/partner/PinGate";
 import { PartnerShell } from "./pages/partner/PartnerShell";
 import { PartnerDay } from "./pages/partner/Day";
 import { PartnerCash } from "./pages/partner/Cash";
@@ -22,7 +22,7 @@ import { PartnerTrend } from "./pages/partner/Trend";
 import { PartnerTrendReport } from "./pages/partner/TrendReport";
 import { PartnerReceivables } from "./pages/partner/Receivables";
 import { PartnerReceivablesReport } from "./pages/partner/ReceivablesReport";
-import { PartnerGuard } from "./pages/partner/PartnerGuard";
+import { PartnerGuard, SupervisorGuard } from "./pages/partner/PartnerGuard";
 
 export const router = createBrowserRouter([
   {
@@ -34,18 +34,27 @@ export const router = createBrowserRouter([
     Component: RoleSelector,
   },
   {
+    path: "/supervisor-pin",
+    Component: SupervisorPinGate,
+  },
+  {
     path: "/supervisor",
-    Component: MobileLayout,
+    Component: SupervisorGuard,
     children: [
-      { index: true, Component: LoomFloor },
-      { path: "production/:loomId", Component: ProductionEntry },
-      { path: "pending", Component: PendingList },
-      { path: "new-loading", Component: NewLoading },
-      { path: "beams", Component: BeamRegister },
-      { path: "designs", Component: DesignsList },
-      { path: "designs/new", Component: DesignCapture },
-      { path: "designs/:designId", Component: DesignDetail },
-      { path: "logs", Component: Logs },
+      {
+        Component: MobileLayout,
+        children: [
+          { index: true, Component: LoomFloor },
+          { path: "production/:loomId", Component: ProductionEntry },
+          { path: "pending", Component: PendingList },
+          { path: "new-loading", Component: NewLoading },
+          { path: "beams", Component: BeamRegister },
+          { path: "designs", Component: DesignsList },
+          { path: "designs/new", Component: DesignCapture },
+          { path: "designs/:designId", Component: DesignDetail },
+          { path: "logs", Component: Logs },
+        ],
+      },
     ],
   },
   {

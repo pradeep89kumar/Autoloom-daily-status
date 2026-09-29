@@ -48,19 +48,8 @@ export default defineConfig({
       workbox: {
         // Pre-cache app shell for instant launch + offline.
         globPatterns: ['**/*.{js,css,html,png,svg,webmanifest,woff,woff2}'],
-        // Network-first for the Apps Script API so data is always fresh; fall back to cache.
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/script\.google\.com\/.*/i,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'apps-script',
-              networkTimeoutSeconds: 5,
-              expiration: { maxEntries: 60, maxAgeSeconds: 60 * 60 * 24 },
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
-        ],
+        // Sheet data is validated and versioned by sheetClient. Do not let the
+        // service worker cache HTTP-200 backend errors or token-bearing URLs.
         navigateFallback: '/index.html',
         cleanupOutdatedCaches: true,
       },

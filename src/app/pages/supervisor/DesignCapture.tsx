@@ -277,7 +277,7 @@ export function DesignCapture() {
     const res = await submitDesign(payload);
     setSubmitting(false);
     if (res.ok) {
-      showToast("Design saved.");
+      showToast(res.verified ? "Design saved." : "Design sent for saving.");
       navigate("/supervisor/designs");
     } else {
       showToast("Could not save. Check the connection and try again.");

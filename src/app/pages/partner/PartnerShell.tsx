@@ -1,12 +1,19 @@
 import { Outlet, NavLink, useNavigate } from "react-router";
 import { CalendarBlank, TrendUp, Wallet, CurrencyInr, ArrowLeft, type Icon } from "@phosphor-icons/react";
-import { setRole } from "../../lib/persona";
+import { logoutSession } from "../../lib/authClient";
+import { clearAllSheetCache } from "../../lib/sheetSync";
+import { showToast, ToastHost } from "../../components/Toast";
 
 export function PartnerShell() {
   const navigate = useNavigate();
 
-  function exit() {
-    setRole("supervisor");
+  async function exit() {
+    const loggedOut = await logoutSession();
+    if (!loggedOut) {
+      showToast("Could not sign out. Check the connection and try again.");
+      return;
+    }
+    clearAllSheetCache();
     navigate("/role", { replace: true });
   }
 
@@ -14,7 +21,7 @@ export function PartnerShell() {
     <div className="h-[100svh] bg-white flex flex-col max-w-md mx-auto border-x border-[var(--color-border-hairline)]">
       <header className="h-14 bg-white border-b border-[var(--color-border-hairline)] flex items-center px-4 shrink-0">
         <button
-          onClick={exit}
+          onClick={() => void exit()}
           className="p-2 -ml-2 mr-2 text-[var(--color-text-primary)]"
           aria-label="Exit Partner"
         >
@@ -36,6 +43,7 @@ export function PartnerShell() {
         <TabLink to="/partner/trend" label="Trend" Icon={TrendUp} />
         <TabLink to="/partner/receivables" label="Receivables" Icon={Wallet} />
       </nav>
+      <ToastHost />
     </div>
   );
 }

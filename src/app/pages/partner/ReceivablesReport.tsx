@@ -28,7 +28,14 @@ import {
   receivablesReportTitle,
 } from "../../lib/receivablesPdf";
 import { fmtRupees } from "../../lib/partnerCopy";
-import { fetchMasterReceivablesResult, type ReceivableRow } from "../../lib/sheetSync";
+import {
+  fetchMasterReceivablesResult,
+  peekMasterReceivablesCache,
+  type ReceivableRow,
+  type SheetReadResult,
+} from "../../lib/sheetSync";
+import { SheetDataStatus } from "../../components/SheetDataStatus";
+import { useSheetResource } from "../../hooks/useSheetResource";
 
 const REPORT_SCOPES: { value: ReceivablesReportScope; label: string }[] = [
   { value: "outstanding", label: "Full outstanding" },
@@ -81,41 +88,44 @@ function downloadFile(file: File) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
 }
 
+async function loadReceivablesReport(): Promise<SheetReadResult<ReceivableRow[]>> {
+  const result = await fetchMasterReceivablesResult();
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: result.rows,
+    source: result.source,
+    lastSyncedAt: result.lastSyncedAt,
+    stale: result.stale,
+    warning: result.warning,
+  };
+}
+
 export function PartnerReceivablesReport() {
   const navigate = useNavigate();
-  const [rows, setRows] = useState<ReceivableRow[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [generatedAt, setGeneratedAt] = useState<Date | null>(null);
   const [reportScope, setReportScope] = useState<ReceivablesReportScope>("outstanding");
   const [paymentFilter, setPaymentFilter] = useState<ReceivablesReportPaymentStatus>("all");
   const [partyKey, setPartyKey] = useState("all");
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
-  const [dataUnavailable, setDataUnavailable] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    let alive = true;
-    setLoading(true);
-    setDataUnavailable(false);
-    fetchMasterReceivablesResult().then((result) => {
-      if (!alive) return;
-      if (!result.ok) {
-        setRows([]);
-        setGeneratedAt(null);
-        setDataUnavailable(true);
-        setLoading(false);
-        return;
-      }
-      setRows(result.rows);
-      setGeneratedAt(new Date());
-      setLoading(false);
-    });
-    return () => {
-      alive = false;
-    };
-  }, []);
+  const receivablesResource = useSheetResource<ReceivableRow[]>({
+    resourceKey: "receivables-report",
+    load: loadReceivablesReport,
+    peek: peekMasterReceivablesCache,
+  });
+  const rows = receivablesResource.data;
+  const loading = receivablesResource.loading;
+  const canExport = receivablesResource.canUseForExport && !receivablesResource.refreshing;
+  const generatedAt = useMemo(
+    () =>
+      receivablesResource.lastSyncedAt
+        ? new Date(receivablesResource.lastSyncedAt)
+        : null,
+    [receivablesResource.lastSyncedAt],
+  );
 
   const report = useMemo(
     () => selectReceivablesReport(rows || [], reportScope, paymentFilter),
@@ -162,7 +172,7 @@ export function PartnerReceivablesReport() {
     setError("");
     setPdfFile(null);
 
-    if (!generatedAt || visibleGroups.length === 0) {
+    if (!canExport || !generatedAt || visibleGroups.length === 0) {
       setPdfBusy(false);
       return () => {
         alive = false;
@@ -198,10 +208,10 @@ export function PartnerReceivablesReport() {
     return () => {
       alive = false;
     };
-  }, [generatedAt, partyKey, partyLabel, paymentFilter, reportScope, visibleGroups]);
+  }, [canExport, generatedAt, partyKey, partyLabel, paymentFilter, reportScope, visibleGroups]);
 
   const handleDownload = () => {
-    if (!pdfFile) return;
+    if (!canExport || !pdfFile) return;
     downloadFile(pdfFile);
     setError("");
     setMessage("PDF downloaded.");
@@ -221,7 +231,7 @@ export function PartnerReceivablesReport() {
   };
 
   const handleWhatsApp = async () => {
-    if (!pdfFile) return;
+    if (!canExport || !pdfFile) return;
     setMessage("");
     setError("");
     const shareData: ShareData = {
@@ -279,9 +289,9 @@ export function PartnerReceivablesReport() {
             <button
               type="button"
               onClick={handleDownload}
-              disabled={!pdfFile || pdfBusy}
+              disabled={!canExport || !pdfFile || pdfBusy}
               aria-label="Download PDF"
-              title="Download PDF"
+              title={canExport ? "Download PDF" : "Waiting for live data"}
               className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-800 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {pdfBusy ? (
@@ -293,9 +303,9 @@ export function PartnerReceivablesReport() {
             <button
               type="button"
               onClick={handleWhatsApp}
-              disabled={!pdfFile || pdfBusy}
+              disabled={!canExport || !pdfFile || pdfBusy}
               aria-label="Share PDF on WhatsApp"
-              title="Share PDF on WhatsApp"
+              title={canExport ? "Share PDF on WhatsApp" : "Waiting for live data"}
               className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-800 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <WhatsappLogo className="h-5 w-5" weight="fill" />
@@ -318,6 +328,24 @@ export function PartnerReceivablesReport() {
             </p>
           </div>
 
+          {(receivablesResource.error ||
+            receivablesResource.warning ||
+            receivablesResource.refreshing) && (
+            <SheetDataStatus
+              error={receivablesResource.error}
+              warning={receivablesResource.warning}
+              refreshing={receivablesResource.refreshing}
+              lastSyncedAt={receivablesResource.lastSyncedAt}
+              onRetry={receivablesResource.refresh}
+              className="mt-5"
+            />
+          )}
+          {(receivablesResource.error || receivablesResource.warning) && (
+            <p className="mt-1.5 text-xs text-slate-500">
+              PDF download and WhatsApp sharing stay disabled until the live refresh succeeds.
+            </p>
+          )}
+
           <div className="mt-6 grid gap-3 sm:grid-cols-3">
             <label className="block">
               <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">
@@ -325,8 +353,13 @@ export function PartnerReceivablesReport() {
               </span>
               <select
                 value={reportScope}
-                onChange={(event) => setReportScope(event.target.value as ReceivablesReportScope)}
-                disabled={loading || dataUnavailable}
+                onChange={(event) => {
+                  setPdfFile(null);
+                  setMessage("");
+                  setError("");
+                  setReportScope(event.target.value as ReceivablesReportScope);
+                }}
+                disabled={loading || rows === null}
                 className="h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
               >
                 {REPORT_SCOPES.map((scope) => (
@@ -343,7 +376,12 @@ export function PartnerReceivablesReport() {
               </span>
               <select
                 value={partyKey}
-                onChange={(event) => setPartyKey(event.target.value)}
+                onChange={(event) => {
+                  setPdfFile(null);
+                  setMessage("");
+                  setError("");
+                  setPartyKey(event.target.value);
+                }}
                 disabled={loading || report.grouped.length === 0}
                 className="h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
               >
@@ -362,10 +400,13 @@ export function PartnerReceivablesReport() {
               </span>
               <select
                 value={paymentFilter}
-                onChange={(event) =>
-                  setPaymentFilter(event.target.value as ReceivablesReportPaymentStatus)
-                }
-                disabled={loading || dataUnavailable}
+                onChange={(event) => {
+                  setPdfFile(null);
+                  setMessage("");
+                  setError("");
+                  setPaymentFilter(event.target.value as ReceivablesReportPaymentStatus);
+                }}
+                disabled={loading || rows === null}
                 className="h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
               >
                 {PAYMENT_STATUSES.map((status) => (
@@ -383,12 +424,12 @@ export function PartnerReceivablesReport() {
                 <div key={item} className="h-24 animate-pulse rounded-xl bg-slate-100" />
               ))}
             </div>
-          ) : dataUnavailable ? (
-            <div className="mt-8 rounded-xl border border-red-200 bg-red-50 px-5 py-10 text-center">
-              <p className="font-semibold text-red-800">Receivables data is unavailable.</p>
-              <p className="mt-1 text-sm text-red-700">
-                Check the connection and Apps Script access, then reopen this report. Export and
-                sharing are disabled.
+          ) : rows === null ? (
+            <div className="mt-8 rounded-xl border border-slate-200 bg-slate-50 px-5 py-10 text-center">
+              <p className="font-semibold text-slate-800">Live receivables data is unavailable.</p>
+              <p className="mt-1 text-sm text-slate-600">
+                Retry the live sync above. No zero-value report will be generated while data is
+                unavailable.
               </p>
             </div>
           ) : visibleGroups.length > 0 ? (

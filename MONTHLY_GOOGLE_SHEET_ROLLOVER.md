@@ -69,8 +69,8 @@ For a Partner/master rollover, do not change:
 
 - `SHEET_ID` — Supervisor production, loadings, catalog, visits and designs.
 - `BEAM_SHEET_ID` — Beam Register.
-- `VITE_SHEET_WEBHOOK_URL` — unless a new Apps Script deployment URL is created.
-- `VITE_API_TOKEN` — unless the Apps Script API token is intentionally changed.
+- Vercel `SHEET_WEBHOOK_URL` — unless a new Apps Script deployment URL is created.
+- Vercel `SHEET_API_TOKEN` — unless the Apps Script API token is intentionally changed.
 
 ## 3. Update the production Apps Script deployment
 
@@ -80,9 +80,11 @@ The repository is not automatically connected to the live Apps Script project. A
 2. Save the Apps Script project.
 3. Update the existing web-app deployment to a new version while retaining the same deployment URL.
 4. Confirm the deployment executor can open the new spreadsheet.
-5. Review the Apps Script execution log for permission, missing-tab or formula errors.
+5. Confirm the `API_TOKEN` Script Property is present before testing. Because `API_TOKEN_REQUIRED` is enabled, a missing token now fails closed and rejects every web request.
+6. Set the `WEB_APP_URL` Script Property to the exact production `/exec` URL used by the app. This prevents diagnostics from selecting a different deployment when the Apps Script project contains multiple web-app deployments.
+7. Review the Apps Script execution log for permission, missing-tab or formula errors.
 
-If a completely new Apps Script project or deployment URL is used, this is no longer a normal monthly rollover. The new project will also require its Script Properties, authorizations and triggers, and Vercel will require the new `VITE_SHEET_WEBHOOK_URL` plus a frontend redeployment.
+If a completely new Apps Script project or deployment URL is used, this is no longer a normal monthly rollover. The new project will also require its Script Properties, authorizations and triggers, and Vercel will require the new server-only `SHEET_WEBHOOK_URL` plus a frontend redeployment.
 
 ## 4. Prepare the new month and copy-forward trigger
 
@@ -90,7 +92,7 @@ If a completely new Apps Script project or deployment URL is used, this is no lo
 
 Complete this check before running any setup function.
 
-The current setup function calls `setProperties(..., true)`. The `true` argument deletes every other Script Property in the same Apps Script project. In a shared project, it can erase `API_TOKEN`, Twilio, CallMeBot, WhatsApp-provider and Gemini configuration.
+The current setup function calls `setProperties(..., true)`. The `true` argument deletes every other Script Property in the same Apps Script project. In a shared project, it can erase `API_TOKEN`, `WEB_APP_URL`, Twilio, CallMeBot, WhatsApp-provider and Gemini configuration.
 
 Do not continue to step 5 below until one of these is confirmed:
 
@@ -109,16 +111,18 @@ Do not continue to step 5 below until one of these is confirmed:
 
 After the Apps Script deployment is updated:
 
-1. Open Partner → Daily and confirm data loads from the new workbook for a known date.
-2. Open Partner → Trend and confirm current-month figures load.
-3. Open Partner → Cash and confirm balances and monthly summary are present.
-4. Open Partner → Receivables and confirm expected invoices/parties load.
-5. Open New Shed Expenses and confirm `Capex Register` data loads.
-6. After the next automation run, confirm the expected dated block was appended to `Looms_Production` exactly once.
-7. Check Apps Script Executions for errors.
-8. If the installed PWA shows old data during a network problem, retry on a reliable connection or in a fresh browser session; Apps Script GET responses can fall back to cache for up to 24 hours.
+1. In the Apps Script editor, run the read-only `diagnoseMasterWorkbook()` function once. In its log, confirm `ok` is `true`, the spreadsheet ID suffix is the new workbook, all required tabs are `true`, the receivables columns resolved, and the latest production/invoice dates are credible. Receivables always use the fixed source contract A Order ID, B Paagu ID, C Customer/design, E Status, K Loom, AA Invoice amount, AB Invoice number, AC Invoice date, AD Due date, AE Receipts, AF Received on, AG Payment status, AN Pending balance and AP Party. Header text is diagnostic only and never remaps these fields. A `FIXED_COLUMN_HEADER_MISMATCH` warning therefore requires checking the named fixed column, but does not change what the app reads.
+2. In the Apps Script editor, run `diagnoseDeployedMasterHealth()`. It calls the production deployment named by the `WEB_APP_URL` Script Property with an authenticated JSON POST, bypasses the short data cache, and never places the token in a URL or log. This check must return `ok: true`; `health.status` may be `warning` only after every reported fixed-column/header diagnostic has been reviewed against the contract above. Confirm `health.requiredTabs`, `health.layouts`, `health.receivables`, `meta.generatedAt` and `meta.timingMs`. An authorization failure means `WEB_APP_URL` points to a restricted/different deployment, `API_TOKEN` is missing, or the deployed version does not match; a master workbook/tab/schema/layout error must be corrected before the rollover is accepted.
+3. Open Partner → Daily and confirm data loads from the new workbook for a known date.
+4. Open Partner → Trend and confirm current-month figures load.
+5. Open Partner → Cash and confirm balances and monthly summary are present.
+6. Open Partner → Receivables and confirm expected invoices/parties load.
+7. Open New Shed Expenses and confirm `Capex Register` data loads.
+8. After the next automation run, confirm the expected dated block was appended to `Looms_Production` exactly once.
+9. Check Apps Script Executions for errors and compare the logged request ID/timing with any failed health response.
+10. If a Partner screen shows a yellow `Showing last synced data` notice, note its timestamp and retry on a reliable connection. The app keeps the last validated copy visible, but PDF download and WhatsApp sharing stay disabled until a fresh live read succeeds. The service worker does not cache sheet API responses.
 
-Do not treat an empty screen as proof that a sheet is empty. Several current frontend reads convert backend, permission and parsing failures into an empty state.
+Do not treat an empty screen as proof that a sheet is empty. A sheet access, schema or timeout failure must show an explicit retry message; investigate it instead of recording the value as zero.
 
 ## 6. Rollback
 
@@ -140,7 +144,10 @@ If verification fails:
 - [ ] `TARGET_SPREADSHEET_ID` updated to the same value
 - [ ] Unrelated workbook IDs left unchanged
 - [ ] Live Apps Script project saved and deployment updated
+- [ ] `diagnoseMasterWorkbook()` returned a healthy result for the new workbook
+- [ ] `diagnoseDeployedMasterHealth()` returned authenticated `ok: true`, with no unexplained health warnings
 - [ ] Script Properties protected
+- [ ] `WEB_APP_URL` matches the production `/exec` URL used by the app
 - [ ] Copy-forward trigger configured for the new month
 - [ ] Partner screens verified
 - [ ] Apps Script execution log checked

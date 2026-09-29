@@ -246,7 +246,11 @@ export function ProductionEntry() {
       });
       setSubmitting(false);
       if (res.ok) {
-        showToast(`Updated ${loom.name} · ${shift} shift · ${shortDate(shiftDate)}`);
+        showToast(
+          res.verified
+            ? `Updated ${loom.name} · ${shift} shift · ${shortDate(shiftDate)}`
+            : `Update sent for ${loom.name} · ${shift} shift · ${shortDate(shiftDate)}`,
+        );
         navigate("/supervisor/logs");
       }
       return;
@@ -271,7 +275,11 @@ export function ProductionEntry() {
     });
     setSubmitting(false);
     if (res.ok) {
-      showToast(`Logged for ${loom.name} · ${shift} shift · ${shortDate(shiftDate)}`);
+      showToast(
+        res.verified
+          ? `Logged for ${loom.name} · ${shift} shift · ${shortDate(shiftDate)}`
+          : `Entry sent for ${loom.name} · ${shift} shift · ${shortDate(shiftDate)}`,
+      );
       if (isBackfill) {
         navigate("/supervisor/pending");
       } else {

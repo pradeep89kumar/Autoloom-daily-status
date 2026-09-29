@@ -8,11 +8,15 @@ import {
 } from "@phosphor-icons/react";
 import { buildCashReportPdf, cashReportFilename } from "../../lib/cashReportPdf";
 import {
-  fetchCashflow,
-  fetchCashLedger,
+  fetchCashflowResult,
+  fetchCashLedgerResult,
+  peekCashflowCache,
+  peekCashLedgerCache,
   type CashflowData,
   type CashLedgerEntry,
 } from "../../lib/sheetSync";
+import { SheetDataStatus } from "../../components/SheetDataStatus";
+import { useSheetResource } from "../../hooks/useSheetResource";
 
 // Report constants — kept in step with the Cash screen so the PDF and the
 // on-screen figures never disagree.
@@ -95,9 +99,6 @@ interface AccountStat {
 
 export function PartnerCashReport() {
   const navigate = useNavigate();
-  const [ledger, setLedger] = useState<CashLedgerEntry[] | null>(null);
-  const [cashflow, setCashflow] = useState<CashflowData | null>(null);
-  const [loading, setLoading] = useState(true);
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -123,28 +124,47 @@ export function PartnerCashReport() {
     return { start, end, periodEnd, complete };
   }, [monthKey, today]);
 
-  const generatedAtDate = useMemo(() => new Date(), []);
+  const ledgerFilter = useMemo(
+    () => ({ from: ymd(period.start), to: ymd(period.periodEnd) }),
+    [period],
+  );
+  const ledgerResource = useSheetResource<CashLedgerEntry[]>({
+    resourceKey: `cash-report:${ledgerFilter.from}:${ledgerFilter.to}`,
+    load: () => fetchCashLedgerResult(ledgerFilter),
+    peek: () => peekCashLedgerCache(ledgerFilter),
+  });
+  const cashflowResource = useSheetResource<CashflowData>({
+    resourceKey: `cash-report:cashflow:${monthKey}`,
+    load: fetchCashflowResult,
+    peek: peekCashflowCache,
+  });
+
+  const ledger = ledgerResource.data;
+  const cashflow = cashflowResource.data;
+  const loading = ledgerResource.loading || cashflowResource.loading;
+  const refreshing = ledgerResource.refreshing || cashflowResource.refreshing;
+  const hasCompleteData = ledger !== null && cashflow !== null;
+  const canExport =
+    hasCompleteData &&
+    ledgerResource.canUseForExport &&
+    cashflowResource.canUseForExport &&
+    !refreshing;
+  const syncedTimes = [ledgerResource.lastSyncedAt, cashflowResource.lastSyncedAt].filter(
+    (value): value is number => value !== null,
+  );
+  const lastSyncedAt = syncedTimes.length === 2 ? Math.min(...syncedTimes) : null;
+  const generatedAtDate = useMemo(
+    () => (lastSyncedAt ? new Date(lastSyncedAt) : null),
+    [lastSyncedAt],
+  );
   const generatedAt = useMemo(
-    () => generatedAtDate.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }),
+    () =>
+      generatedAtDate?.toLocaleString("en-IN", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }) ?? "—",
     [generatedAtDate],
   );
-
-  useEffect(() => {
-    let alive = true;
-    setLoading(true);
-    Promise.all([
-      fetchCashLedger({ from: ymd(period.start), to: ymd(period.periodEnd) }),
-      fetchCashflow(),
-    ]).then(([rows, cf]) => {
-      if (!alive) return;
-      setLedger(rows);
-      setCashflow(cf);
-      setLoading(false);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [period]);
 
   // Month totals — internal transfers are excluded from in/out/net, counted separately.
   const totals = useMemo(() => {
@@ -200,8 +220,8 @@ export function PartnerCashReport() {
     setError("");
     setPdfFile(null);
 
-    if (loading || ledger === null) {
-      setPdfBusy(loading);
+    if (!canExport || !generatedAtDate || ledger === null || cashflow === null) {
+      setPdfBusy(false);
       return () => {
         alive = false;
       };
@@ -237,10 +257,10 @@ export function PartnerCashReport() {
     return () => {
       alive = false;
     };
-  }, [accountStats, cashflow, generatedAtDate, groups, ledger, loading, period, totals]);
+  }, [accountStats, canExport, cashflow, generatedAtDate, groups, ledger, period, totals]);
 
   const handleDownload = () => {
-    if (!pdfFile) return;
+    if (!canExport || !pdfFile) return;
     downloadFile(pdfFile);
     setError("");
     setMessage("PDF downloaded.");
@@ -258,7 +278,7 @@ export function PartnerCashReport() {
   };
 
   const handleWhatsApp = async () => {
-    if (!pdfFile) return;
+    if (!canExport || !pdfFile) return;
     setMessage("");
     setError("");
     const reportTitle = `SAT cash report - ${monthTitle(period.start)}`;
@@ -285,6 +305,14 @@ export function PartnerCashReport() {
       openWhatsAppFallback(pdfFile);
     }
   };
+
+  const retryData = () => {
+    ledgerResource.refresh();
+    cashflowResource.refresh();
+  };
+
+  const syncError = ledgerResource.error ?? cashflowResource.error;
+  const syncWarning = ledgerResource.warning ?? cashflowResource.warning;
 
   return (
     <div className="min-h-screen bg-white text-black">
@@ -319,12 +347,12 @@ export function PartnerCashReport() {
           <button
             type="button"
             onClick={handleDownload}
-            disabled={loading || pdfBusy || !pdfFile}
+            disabled={!canExport || pdfBusy || !pdfFile}
             aria-label="Download PDF"
-            title="Download PDF"
+            title={canExport ? "Download PDF" : "Waiting for live data"}
             className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-black/20 bg-white text-black/80 hover:bg-black/[0.04] disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {loading || pdfBusy ? (
+            {pdfBusy ? (
               <CircleNotch className="h-4 w-4 animate-spin" weight="bold" />
             ) : (
               <DownloadSimple className="h-4 w-4" weight="bold" />
@@ -333,9 +361,9 @@ export function PartnerCashReport() {
           <button
             type="button"
             onClick={handleWhatsApp}
-            disabled={loading || pdfBusy || !pdfFile}
+            disabled={!canExport || pdfBusy || !pdfFile}
             aria-label="Share PDF on WhatsApp"
-            title="Share PDF on WhatsApp"
+            title={canExport ? "Share PDF on WhatsApp" : "Waiting for live data"}
             className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-black/20 bg-white text-black/80 hover:bg-black/[0.04] disabled:cursor-not-allowed disabled:opacity-50"
           >
             <WhatsappLogo className="h-5 w-5" weight="fill" />
@@ -355,9 +383,30 @@ export function PartnerCashReport() {
         </p>
       )}
 
+      {(syncError || syncWarning || refreshing) && (
+        <div className="no-print mx-auto max-w-[794px] px-6 pt-4">
+          <SheetDataStatus
+            error={syncError}
+            warning={syncWarning}
+            refreshing={refreshing}
+            lastSyncedAt={lastSyncedAt}
+            onRetry={retryData}
+          />
+          {(syncError || syncWarning) && (
+            <p className="mt-1.5 text-[11px] text-black/55">
+              PDF download and WhatsApp sharing stay disabled until both cash sources refresh live.
+            </p>
+          )}
+        </div>
+      )}
+
       {loading ? (
         <div className="flex items-center justify-center py-24 text-black/50">
           <CircleNotch className="h-6 w-6 animate-spin" weight="bold" />
+        </div>
+      ) : !hasCompleteData ? (
+        <div className="mx-auto max-w-[794px] px-6 py-16 text-center text-[13px] text-black/60">
+          Live cash data is required before this report can be shown or exported.
         </div>
       ) : (
         <div className="report mx-auto max-w-[794px] px-6 py-6">

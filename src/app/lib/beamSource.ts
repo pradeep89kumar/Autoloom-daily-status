@@ -18,6 +18,17 @@ import {
   type BeamRegisterData,
   type BeamSheetData,
 } from "./beams";
+import {
+  isSheetArrayOf,
+  isSheetFiniteNumber,
+  isSheetJsonRecord,
+  isSheetString,
+  peekSheetCache,
+  readSheet,
+  type SheetCacheSnapshot,
+  type SheetReadRequest,
+  type SheetReadResult,
+} from "./sheetClient";
 
 export interface BeamSource {
   /** Fetch + normalise the current beam register. */
@@ -26,16 +37,6 @@ export interface BeamSource {
   readonly canEdit: boolean;
   /** True when the data is live from the sheet (vs. local sample). */
   readonly isLive: boolean;
-}
-
-const ENDPOINT = import.meta.env.VITE_SHEET_WEBHOOK_URL as string | undefined;
-const API_TOKEN = (import.meta.env.VITE_API_TOKEN as string | undefined) || "";
-
-// Append the shared-secret token to a GET URL. No-op when no token is set.
-function withToken(url: string): string {
-  if (!API_TOKEN) return url;
-  const sep = url.indexOf("?") >= 0 ? "&" : "?";
-  return `${url}${sep}token=${encodeURIComponent(API_TOKEN)}`;
 }
 
 /* ----------------------------- sample data ----------------------------- */
@@ -106,65 +107,127 @@ export class MockBeamSource implements BeamSource {
 }
 
 /* -------------------------- google sheet source ------------------------ */
-function asArray(v: unknown): unknown[] {
-  return Array.isArray(v) ? v : [];
+function optionalString(value: unknown): boolean {
+  return value === undefined || isSheetString(value);
 }
 
-function parseSheetData(raw: unknown): BeamSheetData | null {
-  if (!raw || typeof raw !== "object") return null;
-  const o = raw as Record<string, unknown>;
-  const loaded = asArray(o.loaded).map((x) => {
-    const r = (x ?? {}) as Record<string, unknown>;
-    return {
-      loom: String(r.loom ?? ""),
-      design: String(r.design ?? ""),
-      beamNo: String(r.beamNo ?? ""),
-      customer: r.customer != null ? String(r.customer) : undefined,
-      roDate: r.roDate != null ? String(r.roDate) : undefined,
-    };
-  });
-  const vendor = asArray(o.vendor).map((x) => {
-    const r = (x ?? {}) as Record<string, unknown>;
-    return { vendor: String(r.vendor ?? ""), beamNo: String(r.beamNo ?? "") };
-  });
-  const ready = asArray(o.ready).map((x) => {
-    const r = (x ?? {}) as Record<string, unknown>;
-    const m = Number(r.meters);
-    return {
-      design: String(r.design ?? ""),
-      meters: isFinite(m) && m > 0 ? m : undefined,
-      beamNo: r.beamNo != null ? String(r.beamNo) : undefined,
-    };
-  });
-  const empty = asArray(o.empty).map((x) => {
-    const r = (x ?? {}) as Record<string, unknown>;
-    return { beamNo: String(r.beamNo ?? "") };
-  });
-  const master = asArray(o.master).map((x) => {
-    const r = (x ?? {}) as Record<string, unknown>;
-    return { beamNo: String(r.beamNo ?? ""), location: String(r.location ?? "") };
-  });
-  return { loaded, vendor, ready, empty, master };
+function isLoadedBeam(value: unknown): value is BeamSheetData["loaded"][number] {
+  return (
+    isSheetJsonRecord(value) &&
+    isSheetString(value.loom) &&
+    isSheetString(value.design) &&
+    isSheetString(value.beamNo) &&
+    optionalString(value.customer) &&
+    optionalString(value.roDate)
+  );
+}
+
+function isVendorBeam(value: unknown): value is BeamSheetData["vendor"][number] {
+  return (
+    isSheetJsonRecord(value) &&
+    isSheetString(value.vendor) &&
+    isSheetString(value.beamNo)
+  );
+}
+
+function isReadyBeam(value: unknown): value is BeamSheetData["ready"][number] {
+  return (
+    isSheetJsonRecord(value) &&
+    isSheetString(value.design) &&
+    (value.meters === undefined || isSheetFiniteNumber(value.meters)) &&
+    optionalString(value.beamNo)
+  );
+}
+
+function isRawReadyBeam(value: unknown): value is Record<string, unknown> {
+  return (
+    isSheetJsonRecord(value) &&
+    isSheetString(value.design) &&
+    (value.meters === undefined || value.meters === null || isSheetFiniteNumber(value.meters)) &&
+    optionalString(value.beamNo)
+  );
+}
+
+function isEmptyBeam(value: unknown): value is BeamSheetData["empty"][number] {
+  return isSheetJsonRecord(value) && isSheetString(value.beamNo);
+}
+
+function isMasterBeam(value: unknown): value is BeamSheetData["master"][number] {
+  return (
+    isSheetJsonRecord(value) &&
+    isSheetString(value.beamNo) &&
+    isSheetString(value.location)
+  );
+}
+
+function isBeamSheetData(value: unknown): value is BeamSheetData {
+  if (!isSheetJsonRecord(value)) return false;
+  return (
+    isSheetArrayOf(value.loaded, isLoadedBeam) &&
+    isSheetArrayOf(value.vendor, isVendorBeam) &&
+    isSheetArrayOf(value.ready, isReadyBeam) &&
+    isSheetArrayOf(value.empty, isEmptyBeam) &&
+    isSheetArrayOf(value.master, isMasterBeam)
+  );
+}
+
+function parseBeamSheetData(body: Record<string, unknown>): BeamSheetData {
+  if (
+    !isSheetArrayOf(body.loaded, isLoadedBeam) ||
+    !isSheetArrayOf(body.vendor, isVendorBeam) ||
+    !isSheetArrayOf(body.ready, isRawReadyBeam) ||
+    !isSheetArrayOf(body.empty, isEmptyBeam) ||
+    !isSheetArrayOf(body.master, isMasterBeam)
+  ) {
+    throw new Error("invalid beams response");
+  }
+  return {
+    loaded: body.loaded,
+    vendor: body.vendor,
+    ready: body.ready.map((item) => {
+      const row = item as Record<string, unknown>;
+      const meters = isSheetFiniteNumber(row.meters) && row.meters > 0 ? row.meters : undefined;
+      return {
+        design: row.design as string,
+        meters,
+        beamNo: typeof row.beamNo === "string" ? row.beamNo : undefined,
+      };
+    }),
+    empty: body.empty,
+    master: body.master,
+  };
+}
+
+function beamSheetRequest(): SheetReadRequest<BeamSheetData> {
+  return {
+    key: "supervisor:beams",
+    params: { mode: "beams" },
+    select: parseBeamSheetData,
+    validate: isBeamSheetData,
+  };
+}
+
+function mapBeamResult(result: SheetReadResult<BeamSheetData>): SheetReadResult<BeamRegisterData> {
+  if (!result.ok) return result;
+  return { ...result, data: normalizeBeams(result.data) };
+}
+
+export async function fetchBeamRegisterResult(): Promise<SheetReadResult<BeamRegisterData>> {
+  return mapBeamResult(await readSheet(beamSheetRequest()));
+}
+
+export function peekBeamRegisterCache(): SheetCacheSnapshot<BeamRegisterData> | null {
+  const cached = peekSheetCache(beamSheetRequest());
+  return cached ? { ...cached, data: normalizeBeams(cached.data) } : null;
 }
 
 export class GoogleSheetBeamSource implements BeamSource {
   readonly canEdit = false;
   readonly isLive = true;
   async getBeamRegister(): Promise<BeamRegisterData> {
-    if (!ENDPOINT) throw new Error("no endpoint");
-    const res = await fetch(withToken(`${ENDPOINT}?mode=beams`), { method: "GET" });
-    const data = await res.json();
-    if (!data?.ok) throw new Error("beams endpoint not ready");
-    // An endpoint that doesn't yet handle ?mode=beams falls through to the
-    // default light-rows response ({ok:true, rows:[...]}) with none of the beam
-    // keys. Treat that as "not deployed" so we fall back to the sample.
-    const hasBeamKeys = ["loaded", "vendor", "ready", "empty", "master"].some(
-      (k) => Array.isArray((data as Record<string, unknown>)[k]),
-    );
-    if (!hasBeamKeys) throw new Error("beams endpoint not deployed");
-    const parsed = parseSheetData(data);
-    if (!parsed) throw new Error("bad beams payload");
-    return normalizeBeams(parsed);
+    const result = await fetchBeamRegisterResult();
+    if (!result.ok) throw new Error(`beam source unavailable (${result.error.kind})`);
+    return result.data;
   }
 }
 

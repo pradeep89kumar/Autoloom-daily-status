@@ -1,7 +1,13 @@
-import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { ArrowLeft, CircleNotch } from "@phosphor-icons/react";
-import { fetchCapex, type CapexData, type CapexRow } from "../../lib/sheetSync";
+import { ArrowLeft } from "@phosphor-icons/react";
+import { SheetDataStatus } from "../../components/SheetDataStatus";
+import { useSheetResource } from "../../hooks/useSheetResource";
+import {
+  fetchCapexResult,
+  peekCapexCache,
+  type CapexData,
+  type CapexRow,
+} from "../../lib/sheetSync";
 
 function fmtINR(n: number): string {
   if (!isFinite(n)) return "—";
@@ -33,27 +39,12 @@ function sortedBreakup(obj: Record<string, number>): { label: string; amount: nu
 
 export function PartnerNewShedExpenses() {
   const navigate = useNavigate();
-  const [data, setData] = useState<CapexData | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let alive = true;
-    setLoading(true);
-    const startedAt = Date.now();
-    fetchCapex("6 Looms").then((d) => {
-      if (!alive) return;
-      const elapsed = Date.now() - startedAt;
-      const wait = Math.max(0, 300 - elapsed);
-      setTimeout(() => {
-        if (!alive) return;
-        setData(d);
-        setLoading(false);
-      }, wait);
-    });
-    return () => {
-      alive = false;
-    };
-  }, []);
+  const capexResource = useSheetResource<CapexData>({
+    resourceKey: "partner:capex:6-looms",
+    load: () => fetchCapexResult("6 Looms"),
+    peek: () => peekCapexCache("6 Looms"),
+  });
+  const { data, loading } = capexResource;
 
   const grouped = data ? groupByDate(data.rows) : [];
   const byFunding = data ? sortedBreakup(data.byFunding) : [];
@@ -76,9 +67,18 @@ export function PartnerNewShedExpenses() {
       </header>
 
       <main className="flex-1 min-h-0 overflow-y-auto relative">
+        <SheetDataStatus
+          error={capexResource.error}
+          warning={capexResource.warning}
+          refreshing={capexResource.refreshing}
+          lastSyncedAt={capexResource.lastSyncedAt}
+          onRetry={capexResource.refresh}
+          className="mx-4 mt-3"
+        />
+
         {loading && data === null && <ExpensesSkeleton />}
 
-        {!loading && data === null && (
+        {!loading && data === null && !capexResource.error && (
           <div className="px-4 py-10 text-center">
             <p className="text-[14px] text-[var(--color-text-secondary)]">Capex data unavailable.</p>
           </div>
@@ -150,11 +150,6 @@ export function PartnerNewShedExpenses() {
           </>
         )}
 
-        {loading && data !== null && (
-          <div className="absolute inset-0 bg-white/60 flex items-start justify-center pt-10 z-10">
-            <CircleNotch className="w-5 h-5 animate-spin text-[var(--color-text-secondary)]" weight="bold" />
-          </div>
-        )}
       </main>
     </div>
   );

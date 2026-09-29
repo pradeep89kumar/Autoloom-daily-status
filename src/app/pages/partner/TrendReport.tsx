@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { ArrowLeft, Printer, CircleNotch } from "@phosphor-icons/react";
 import {
@@ -8,9 +8,15 @@ import {
   YAxis,
   CartesianGrid,
 } from "recharts";
-import { fetchMasterRange, type MasterRangeRow } from "../../lib/sheetSync";
+import {
+  fetchMasterRangeResult,
+  peekMasterRangeCache,
+  type MasterRangeRow,
+} from "../../lib/sheetSync";
 import { LOOM_CATALOG, isNewLoom } from "../../lib/looms";
 import { fmtRupees, fmtMeters } from "../../lib/partnerCopy";
+import { SheetDataStatus } from "../../components/SheetDataStatus";
+import { useSheetResource } from "../../hooks/useSheetResource";
 
 // Report constants — kept in step with the Trend screen so the PDF and the
 // on-screen figures never disagree.
@@ -101,8 +107,6 @@ const BAND_LABEL: Record<LoomStat["band"], string> = {
 
 export function PartnerTrendReport() {
   const navigate = useNavigate();
-  const [rows, setRows] = useState<MasterRangeRow[] | null>(null);
-  const [loading, setLoading] = useState(true);
 
   const today = useMemo(() => {
     const d = new Date();
@@ -124,24 +128,32 @@ export function PartnerTrendReport() {
     return { start, end, periodEnd, complete, daysInMonth: end.getDate() };
   }, [monthKey, today]);
 
-  const generatedAt = useMemo(
-    () => new Date().toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }),
-    [],
+  const from = ymd(period.start);
+  const to = ymd(period.periodEnd);
+  const rangeResource = useSheetResource<MasterRangeRow[]>({
+    resourceKey: `trend-report:${from}:${to}`,
+    load: () => fetchMasterRangeResult(from, to),
+    peek: () => peekMasterRangeCache(from, to),
+  });
+  const rows = useMemo(
+    () =>
+      rangeResource.data?.filter(
+        (row) => !(isNewLoom(row.loom) && row.date < NEW_LOOM_START),
+      ) ?? null,
+    [rangeResource.data],
   );
-
-  useEffect(() => {
-    let alive = true;
-    setLoading(true);
-    fetchMasterRange(ymd(period.start), ymd(period.periodEnd)).then((r) => {
-      if (!alive) return;
-      const filtered = r.filter((row) => !(isNewLoom(row.loom) && row.date < NEW_LOOM_START));
-      setRows(filtered);
-      setLoading(false);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [period]);
+  const loading = rangeResource.loading;
+  const canExport = rangeResource.canUseForExport && !rangeResource.refreshing;
+  const generatedAt = useMemo(
+    () =>
+      rangeResource.lastSyncedAt
+        ? new Date(rangeResource.lastSyncedAt).toLocaleString("en-IN", {
+            dateStyle: "medium",
+            timeStyle: "short",
+          })
+        : "—",
+    [rangeResource.lastSyncedAt],
+  );
 
   // Month-to-date fleet summary — mirrors the Trend screen's target tracker.
   const summary = useMemo(() => {
@@ -298,10 +310,11 @@ export function PartnerTrendReport() {
           </select>
           <button
             onClick={() => window.print()}
-            disabled={loading}
+            disabled={!canExport}
+            title={canExport ? "Save as PDF" : "Waiting for live data"}
             className="inline-flex items-center gap-2 rounded-lg bg-black px-4 py-2 text-[14px] font-semibold text-white disabled:opacity-50"
           >
-            {loading ? (
+            {rangeResource.refreshing ? (
               <CircleNotch className="h-4 w-4 animate-spin" weight="bold" />
             ) : (
               <Printer className="h-4 w-4" weight="bold" />
@@ -311,9 +324,30 @@ export function PartnerTrendReport() {
         </div>
       </div>
 
+      {(rangeResource.error || rangeResource.warning || rangeResource.refreshing) && (
+        <div className="no-print mx-auto max-w-[794px] px-6 pt-4">
+          <SheetDataStatus
+            error={rangeResource.error}
+            warning={rangeResource.warning}
+            refreshing={rangeResource.refreshing}
+            lastSyncedAt={rangeResource.lastSyncedAt}
+            onRetry={rangeResource.refresh}
+          />
+          {(rangeResource.error || rangeResource.warning) && (
+            <p className="mt-1.5 text-[11px] text-black/55">
+              Save as PDF stays disabled until this month refreshes from the live sheet.
+            </p>
+          )}
+        </div>
+      )}
+
       {loading ? (
         <div className="flex items-center justify-center py-24 text-black/50">
           <CircleNotch className="h-6 w-6 animate-spin" weight="bold" />
+        </div>
+      ) : rows === null ? (
+        <div className="mx-auto max-w-[794px] px-6 py-16 text-center text-[13px] text-black/60">
+          Live production data is required before this report can be shown or saved as PDF.
         </div>
       ) : (
         <div className="report mx-auto max-w-[794px] px-6 py-6">

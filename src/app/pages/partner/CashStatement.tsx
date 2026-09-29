@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router";
-import { ArrowLeft, CircleNotch } from "@phosphor-icons/react";
+import { ArrowLeft } from "@phosphor-icons/react";
+import { SheetDataStatus } from "../../components/SheetDataStatus";
+import { useSheetResource } from "../../hooks/useSheetResource";
 import {
-  fetchCashLedger,
+  fetchCashLedgerResult,
+  peekCashLedgerCache,
   type CashAccount,
   type CashLedgerEntry,
   type CashLedgerFilter,
@@ -52,31 +55,21 @@ export function PartnerCashStatement() {
   const [account, setAccount] = useState<CashAccount | "all">("all");
   const [direction, setDirection] = useState<"all" | "in" | "out">("all");
 
-  const [entries, setEntries] = useState<CashLedgerEntry[] | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let alive = true;
-    setLoading(true);
+  const filter = useMemo<CashLedgerFilter>(() => {
     const { from, to } = currentMonthRange();
-    const filter: CashLedgerFilter = { from, to };
-    if (account !== "all") filter.account = account;
-    if (direction !== "all") filter.direction = direction;
-    const startedAt = Date.now();
-    fetchCashLedger(filter).then((rows) => {
-      if (!alive) return;
-      const elapsed = Date.now() - startedAt;
-      const wait = Math.max(0, 300 - elapsed);
-      setTimeout(() => {
-        if (!alive) return;
-        setEntries(rows);
-        setLoading(false);
-      }, wait);
-    });
-    return () => {
-      alive = false;
+    return {
+      from,
+      to,
+      account: account === "all" ? undefined : account,
+      direction: direction === "all" ? undefined : direction,
     };
   }, [account, direction]);
+  const ledgerResource = useSheetResource<CashLedgerEntry[]>({
+    resourceKey: `partner:cash-ledger:${filter.from}:${filter.to}:${filter.account || "all"}:${filter.direction || "all"}`,
+    load: () => fetchCashLedgerResult(filter),
+    peek: () => peekCashLedgerCache(filter),
+  });
+  const { data: entries, loading } = ledgerResource;
 
   const grouped = useMemo(() => groupByDate(entries || []), [entries]);
   const totals = useMemo(() => computeTotals(entries || []), [entries]);
@@ -122,13 +115,16 @@ export function PartnerCashStatement() {
       </div>
 
       <main className="flex-1 min-h-0 overflow-y-auto relative">
-        {loading && entries === null && <StatementSkeleton />}
+        <SheetDataStatus
+          error={ledgerResource.error}
+          warning={ledgerResource.warning}
+          refreshing={ledgerResource.refreshing}
+          lastSyncedAt={ledgerResource.lastSyncedAt}
+          onRetry={ledgerResource.refresh}
+          className="mx-4 mt-3"
+        />
 
-        {loading && entries !== null && (
-          <div className="absolute inset-0 bg-white/60 flex items-start justify-center pt-10 z-10">
-            <CircleNotch className="w-5 h-5 animate-spin text-[var(--color-text-secondary)]" weight="bold" />
-          </div>
-        )}
+        {loading && entries === null && <StatementSkeleton />}
 
         {!loading && entries !== null && entries.length === 0 && (
           <div className="px-4 py-10 text-center">

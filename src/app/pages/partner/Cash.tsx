@@ -1,7 +1,13 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { CaretRight, CaretDown, CaretUp, Warning, FilePdf } from "@phosphor-icons/react";
-import { fetchCashflow, type CashflowData } from "../../lib/sheetSync";
+import { SheetDataStatus } from "../../components/SheetDataStatus";
+import { useSheetResource } from "../../hooks/useSheetResource";
+import {
+  fetchCashflowResult,
+  peekCashflowCache,
+  type CashflowData,
+} from "../../lib/sheetSync";
 
 function fmtINR(n: number): string {
   if (!isFinite(n)) return "—";
@@ -34,28 +40,13 @@ function timeAgo(iso: string): string {
 
 export function PartnerCash() {
   const navigate = useNavigate();
-  const [data, setData] = useState<CashflowData | null>(null);
-  const [loading, setLoading] = useState(true);
   const [opExpanded, setOpExpanded] = useState(false);
-
-  useEffect(() => {
-    let alive = true;
-    setLoading(true);
-    const startedAt = Date.now();
-    fetchCashflow().then((d) => {
-      if (!alive) return;
-      const elapsed = Date.now() - startedAt;
-      const wait = Math.max(0, 400 - elapsed);
-      setTimeout(() => {
-        if (!alive) return;
-        setData(d);
-        setLoading(false);
-      }, wait);
-    });
-    return () => {
-      alive = false;
-    };
-  }, []);
+  const cashResource = useSheetResource<CashflowData>({
+    resourceKey: "partner:cashflow",
+    load: fetchCashflowResult,
+    peek: peekCashflowCache,
+  });
+  const { data, loading } = cashResource;
 
   const stale = data && daysSince(data.lastEntryDate) > 2;
 
@@ -81,9 +72,18 @@ export function PartnerCash() {
         </button>
       </div>
 
+      <SheetDataStatus
+        error={cashResource.error}
+        warning={cashResource.warning}
+        refreshing={cashResource.refreshing}
+        lastSyncedAt={cashResource.lastSyncedAt}
+        onRetry={cashResource.refresh}
+        className="mb-3"
+      />
+
       {loading && <CashSkeleton />}
 
-      {!loading && !data && (
+      {!loading && !data && !cashResource.error && (
         <div className="rounded-xl bg-white border border-[var(--color-border-hairline)] shadow-[0_2px_8px_rgba(0,0,0,0.06)] px-4 py-6 text-center">
           <p className="text-[14px] text-[var(--color-text-secondary)]">
             Cashflow data unavailable.

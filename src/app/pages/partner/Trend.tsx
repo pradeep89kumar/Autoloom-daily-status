@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { TrendUp, TrendDown, ArrowRight, CaretDown, FilePdf } from "@phosphor-icons/react";
 import {
@@ -10,7 +10,13 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
-import { fetchMasterRange, type MasterRangeRow } from "../../lib/sheetSync";
+import { SheetDataStatus } from "../../components/SheetDataStatus";
+import { useSheetResource } from "../../hooks/useSheetResource";
+import {
+  fetchMasterRangeResult,
+  peekMasterRangeCache,
+  type MasterRangeRow,
+} from "../../lib/sheetSync";
 import { LOOM_CATALOG, isNewLoom } from "../../lib/looms";
 import {
   fmtMeters,
@@ -127,9 +133,6 @@ function tintForMagnitude(value: number | null, max: number): string {
 export function PartnerTrend() {
   const navigate = useNavigate();
   const [metric, setMetric] = useState<Metric>("efficiency");
-  const [rows, setRows] = useState<MasterRangeRow[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [mtdRows, setMtdRows] = useState<MasterRangeRow[] | null>(null);
   const [showDetail, setShowDetail] = useState(false);
 
   const dates = useMemo(() => lastNDates(DAYS), []);
@@ -138,47 +141,38 @@ export function PartnerTrend() {
     const d = new Date();
     return new Date(d.getFullYear(), d.getMonth(), 1);
   }, []);
+  const recentFrom = ymd(dates[0]);
+  const recentTo = ymd(dates[dates.length - 1]);
+  const recentResource = useSheetResource<MasterRangeRow[]>({
+    resourceKey: `partner:trend:14d:${recentFrom}:${recentTo}`,
+    load: () => fetchMasterRangeResult(recentFrom, recentTo),
+    peek: () => peekMasterRangeCache(recentFrom, recentTo),
+  });
+  const monthFrom = ymd(monthStart);
+  const monthTo = ymd(new Date());
+  const mtdResource = useSheetResource<MasterRangeRow[]>({
+    resourceKey: `partner:trend:mtd:${monthFrom}:${monthTo}`,
+    load: () => fetchMasterRangeResult(monthFrom, monthTo),
+    peek: () => peekMasterRangeCache(monthFrom, monthTo),
+  });
 
-  useEffect(() => {
-    let alive = true;
-    setLoading(true);
-    const from = ymd(dates[0]);
-    const to = ymd(dates[dates.length - 1]);
-    const startedAt = Date.now();
-    fetchMasterRange(from, to).then((r) => {
-      if (!alive) return;
-      // Drop rows for newly added looms before their production-start date —
-      // they were copied forward by the master sheet automation but never
-      // physically ran. Otherwise their averages and heatmap would be skewed
-      // by zero-meter rows.
-      const filtered = r.filter((row) => !(isNewLoom(row.loom) && row.date < NEW_LOOM_START));
-      const wait = Math.max(0, 400 - (Date.now() - startedAt));
-      setTimeout(() => {
-        if (!alive) return;
-        setRows(filtered);
-        setLoading(false);
-      }, wait);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [dates]);
-
-  useEffect(() => {
-    let alive = true;
-    const from = ymd(monthStart);
-    const to = ymd(new Date());
-    fetchMasterRange(from, to).then((r) => {
-      if (!alive) return;
-      const filtered = r.filter(
+  // Rows copied forward before the new looms physically started must not skew
+  // either the trend window or the month-to-date target calculations.
+  const rows = useMemo(
+    () =>
+      recentResource.data?.filter(
         (row) => !(isNewLoom(row.loom) && row.date < NEW_LOOM_START),
-      );
-      setMtdRows(filtered);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [monthStart]);
+      ) ?? null,
+    [recentResource.data],
+  );
+  const mtdRows = useMemo(
+    () =>
+      mtdResource.data?.filter(
+        (row) => !(isNewLoom(row.loom) && row.date < NEW_LOOM_START),
+      ) ?? null,
+    [mtdResource.data],
+  );
+  const loading = recentResource.loading;
 
   const grid = useMemo(() => buildGrid(rows || []), [rows]);
 
@@ -335,12 +329,29 @@ export function PartnerTrend() {
         </button>
       </div>
 
+      <SheetDataStatus
+        error={recentResource.error}
+        warning={recentResource.warning}
+        refreshing={recentResource.refreshing}
+        lastSyncedAt={recentResource.lastSyncedAt}
+        onRetry={recentResource.refresh}
+        className="mb-3"
+      />
+      <SheetDataStatus
+        error={mtdResource.error}
+        warning={mtdResource.warning}
+        refreshing={mtdResource.refreshing && !recentResource.refreshing}
+        lastSyncedAt={mtdResource.lastSyncedAt}
+        onRetry={mtdResource.refresh}
+        className="mb-3"
+      />
+
       {/* Monthly target tracker — verdict-first */}
-      {targetStats ? (
-        <MonthTargetCard stats={targetStats} monthStart={monthStart} momentum={momentum} loomStatus={loomStatus} />
-      ) : (
+      {mtdResource.loading ? (
         <div className="h-56 bg-black/[0.04] rounded-xl animate-pulse mb-5" />
-      )}
+      ) : targetStats ? (
+        <MonthTargetCard stats={targetStats} monthStart={monthStart} momentum={momentum} loomStatus={loomStatus} />
+      ) : null}
 
       {/* Tier 4 — detail on demand */}
       <button
@@ -351,7 +362,7 @@ export function PartnerTrend() {
         <Chevron open={showDetail} />
       </button>
 
-      {!showDetail ? null : (
+      {!showDetail ? null : recentResource.error && rows === null ? null : (
       <div className="mt-5">
       <div className="mb-4">
         <h2 className="text-[18px] font-bold mb-1 text-[var(--color-text-primary)]">கடந்த {DAYS} நாட்கள்</h2>

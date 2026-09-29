@@ -46,7 +46,8 @@ export function RoleSelector() {
           Icon={HardHat}
           title="Supervisor"
           subtitle="Shop-floor logging · loadings"
-          onClick={() => navigate("/supervisor")}
+          locked
+          onClick={() => navigate("/supervisor-pin")}
         />
       </div>
 
@@ -149,4 +150,3 @@ function RoleCard({
     </button>
   );
 }
-

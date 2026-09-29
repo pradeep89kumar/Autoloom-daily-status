@@ -1,7 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { CaretDown, CaretUp, FilePdf, MagnifyingGlass, X } from "@phosphor-icons/react";
 import { useNavigate } from "react-router";
-import { fetchMasterReceivables, type ReceivableRow } from "../../lib/sheetSync";
+import { SheetDataStatus } from "../../components/SheetDataStatus";
+import { useSheetResource } from "../../hooks/useSheetResource";
+import {
+  fetchMasterReceivablesResult,
+  peekMasterReceivablesCache,
+  type ReceivableRow,
+  type SheetReadResult,
+} from "../../lib/sheetSync";
 import { fmtRupees } from "../../lib/partnerCopy";
 import {
   advanceAmount,
@@ -24,6 +31,19 @@ type ReceivablesView = "party" | "invoice";
 type InvoiceMode = "outstanding" | "paid";
 type InvoiceFilter = "pending" | "overdue" | "partial";
 type InvoiceSortDirection = "desc" | "asc";
+
+async function loadReceivablesResult(): Promise<SheetReadResult<ReceivableRow[]>> {
+  const result = await fetchMasterReceivablesResult();
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: result.rows,
+    source: result.source,
+    lastSyncedAt: result.lastSyncedAt,
+    stale: result.stale,
+    warning: result.warning,
+  };
+}
 
 const invoiceNumberCollator = new Intl.Collator("en", {
   numeric: true,
@@ -269,8 +289,6 @@ function InvoiceLedgerTable({ rows }: { rows: ReceivableRow[] }) {
 
 export function PartnerReceivables() {
   const navigate = useNavigate();
-  const [rows, setRows] = useState<ReceivableRow[] | null>(null);
-  const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<FilterKey>("pending");
@@ -279,24 +297,12 @@ export function PartnerReceivables() {
   const [invoiceFilter, setInvoiceFilter] = useState<InvoiceFilter>("pending");
   const [invoiceSort, setInvoiceSort] = useState<InvoiceSortDirection>("desc");
   const [invoiceSearch, setInvoiceSearch] = useState("");
-
-  useEffect(() => {
-    let alive = true;
-    setLoading(true);
-    const startedAt = Date.now();
-    fetchMasterReceivables().then((r) => {
-      if (!alive) return;
-      const wait = Math.max(0, 400 - (Date.now() - startedAt));
-      setTimeout(() => {
-        if (!alive) return;
-        setRows(r);
-        setLoading(false);
-      }, wait);
-    });
-    return () => {
-      alive = false;
-    };
-  }, []);
+  const receivablesResource = useSheetResource<ReceivableRow[]>({
+    resourceKey: "partner:receivables:all",
+    load: loadReceivablesResult,
+    peek: peekMasterReceivablesCache,
+  });
+  const { data: rows, loading } = receivablesResource;
 
   const { merged, grouped, grandTotal, grandAdvance } = useMemo(
     () => selectReceivables(rows || [], filter),
@@ -405,7 +411,16 @@ export function PartnerReceivables() {
         ))}
       </div>
 
-      {view === "party" ? (
+      <SheetDataStatus
+        error={receivablesResource.error}
+        warning={receivablesResource.warning}
+        refreshing={receivablesResource.refreshing}
+        lastSyncedAt={receivablesResource.lastSyncedAt}
+        onRetry={receivablesResource.refresh}
+        className="mb-3"
+      />
+
+      {loading || rows !== null ? (view === "party" ? (
         <>
 
       <div className="mb-3 flex gap-2 overflow-x-auto -mx-1 px-1">
@@ -838,7 +853,7 @@ export function PartnerReceivables() {
             <InvoiceLedgerTable rows={visibleInvoiceRows} />
           )}
         </>
-      )}
+      )) : null}
     </div>
   );
 }

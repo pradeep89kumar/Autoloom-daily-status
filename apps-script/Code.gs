@@ -16,6 +16,8 @@
  *  GET  ?mode=master-range&from=YYYY-MM-DD&to=YYYY-MM-DD → light per-loom-per-day aggregates
  *  GET  ?mode=master-orders                    → master Order tab rows
  *  GET  ?mode=master-receivables               → master Paagu ID receivables view
+ *  GET  ?mode=master-health                    → authenticated master workbook health
+ *  POST kind:"master-health"                  → same health check with token in JSON body
  *  GET  ?mode=cashflow                         → cash position + monthly summary from Master Control tab
  *  GET  ?mode=cashflow-ledger&from=&to=&account=&direction= → ledger entries for the statement view
  *  GET  ?mode=capex&project=6%20Looms          → Capex Register entries + totals for one project (default "6 Looms")
@@ -40,6 +42,22 @@ var MASTER_ORDER_TAB = "Order";
 var MASTER_PAAGU_TAB = "Paagu ID";
 var MASTER_CASHFLOW_TAB = "Master Control";   // ← confirm exact tab name
 var MASTER_CAPEX_TAB = "Capex Register";
+
+// Receivables API safeguards. Keep cache lifetimes deliberately short because
+// this is financial data, and fail rather than silently returning a partial
+// dataset when a duplicated monthly workbook exceeds the reviewed bounds.
+var MASTER_RECEIVABLES_API_VERSION = 2;
+var MASTER_RECEIVABLES_SCHEMA_VERSION = "2026-09-29";
+var MASTER_RECEIVABLES_CACHE_VERSION = "master-receivables-v1";
+var MASTER_RECEIVABLES_CACHE_TTL_SECONDS = 30;
+var MASTER_RECEIVABLES_CACHE_CHUNK_BYTES = 85000;
+var MASTER_RECEIVABLES_MAX_CACHE_CHUNKS = 40;
+var MASTER_RECEIVABLES_MAX_GRID_ROWS = 50000;
+var MASTER_RECEIVABLES_MAX_DATA_ROWS = 10000;
+var MASTER_RECEIVABLES_MAX_PAGE_SIZE = 250;
+var MASTER_PRODUCTION_CACHE_VERSION = "master-production-v1";
+var MASTER_PRODUCTION_CACHE_TTL_SECONDS = 30;
+var MASTER_PRODUCTION_MAX_GRID_ROWS = 50000;
 
 // Beam Register — separate spreadsheet tracking every physical beam asset.
 var BEAM_SHEET_ID = "1sHQIkVJcB-QfuuFVCWo16WpNjlZtLFFne5v4XvcF2YI";
@@ -139,7 +157,8 @@ var DESIGN_IMG_FOLDER = "SAT Design Images";
 
 // Shared-secret API token (set in Project Settings → Script Properties as API_TOKEN).
 // Phase control:
-//   API_TOKEN unset            → endpoint stays fully open (legacy behaviour).
+//   API_TOKEN unset + REQUIRED=false → endpoint stays open (legacy migration only).
+//   API_TOKEN unset + REQUIRED=true  → fail closed; every web request is rejected.
 //   API_TOKEN set + REQUIRED=false → migration mode: a wrong token is rejected,
 //                                    but a missing token is still allowed so the
 //                                    PWA keeps working until it ships the token.
@@ -215,7 +234,7 @@ function _extractToken(e) {
 
 // Returns true when the request may proceed. See the API_TOKEN phase notes above.
 function _authOk(e) {
-  if (!API_TOKEN) return true;                 // no secret configured → open
+  if (!API_TOKEN) return !API_TOKEN_REQUIRED;  // enforced mode must never fail open
   var provided = _extractToken(e);
   if (!provided) return !API_TOKEN_REQUIRED;   // missing token allowed only in migration mode
   return provided === API_TOKEN;               // a supplied token must match exactly
@@ -229,32 +248,47 @@ function doGet(e) {
   if (mode === "catalog")  return _json({ ok: true, orders: _readOrders() });
   if (mode === "master-day") {
     var date = (e.parameter && e.parameter.date) || _ymd(new Date());
-    return _json({ ok: true, date: date, rows: _readMasterDay(date) });
+    return _json(_masterReadResponse("master-day", function () {
+      return { ok: true, date: date, rows: _readMasterDay(date) };
+    }));
   }
   if (mode === "master-range") {
     var from = (e.parameter && e.parameter.from) || "";
     var to = (e.parameter && e.parameter.to) || _ymd(new Date());
-    return _json({ ok: true, from: from, to: to, rows: _readMasterRange(from, to) });
+    return _json(_masterReadResponse("master-range", function () {
+      return { ok: true, from: from, to: to, rows: _readMasterRange(from, to) };
+    }));
   }
   if (mode === "master-orders") {
-    return _json({ ok: true, rows: _readMasterOrders() });
+    return _json(_masterReadResponse("master-orders", function () {
+      return { ok: true, rows: _readMasterOrders() };
+    }));
   }
   if (mode === "master-receivables") {
-    return _json({ ok: true, rows: _readMasterReceivables() });
+    return _json(_masterReceivablesResponse(e));
+  }
+  if (mode === "master-health") {
+    return _json(_masterWorkbookHealthResponse(e));
   }
   if (mode === "cashflow") {
-    return _json({ ok: true, cashflow: _readCashflow() });
+    return _json(_masterReadResponse("cashflow", function () {
+      return { ok: true, cashflow: _readCashflow() };
+    }));
   }
   if (mode === "cashflow-ledger") {
     var cfFrom = (e.parameter && e.parameter.from) || "";
     var cfTo   = (e.parameter && e.parameter.to)   || _ymd(new Date());
     var cfAcct = (e.parameter && e.parameter.account)   || "";
     var cfDir  = (e.parameter && e.parameter.direction) || "";
-    return _json({ ok: true, rows: _readCashLedger(cfFrom, cfTo, cfAcct, cfDir) });
+    return _json(_masterReadResponse("cashflow-ledger", function () {
+      return { ok: true, rows: _readCashLedger(cfFrom, cfTo, cfAcct, cfDir) };
+    }));
   }
   if (mode === "capex") {
     var capexProject = (e.parameter && e.parameter.project) || "6 Looms";
-    return _json({ ok: true, capex: _readCapex(capexProject) });
+    return _json(_masterReadResponse("capex", function () {
+      return { ok: true, capex: _readCapex(capexProject) };
+    }));
   }
   if (mode === "beams") {
     return _readBeams();
@@ -284,6 +318,12 @@ function doPost(e) {
   if (p.kind === "design")      return _logDesign(p);
   if (p.kind === "design-image") return _saveDesignImage(p);
   if (p.kind === "design-extract") return _extractDesign(p);
+  if (p.kind === "master-health") {
+    var healthFresh = String(p.fresh || "").toLowerCase();
+    return _json(_masterWorkbookHealthResponse({
+      parameter: { fresh: healthFresh === "1" || healthFresh === "true" ? "1" : "0" }
+    }));
+  }
   return _json({ ok: false, error: "unknown kind" });
 }
 
@@ -325,7 +365,10 @@ function _logVisit(p) {
 function diagnoseVisit() {
   Logger.log("API_TOKEN set: " + (API_TOKEN ? "yes" : "NO"));
   Logger.log("API_TOKEN_REQUIRED: " + API_TOKEN_REQUIRED);
-  if (API_TOKEN && API_TOKEN_REQUIRED) {
+  if (API_TOKEN_REQUIRED && !API_TOKEN) {
+    Logger.log("→ CONFIGURATION ERROR: API_TOKEN_REQUIRED is true but API_TOKEN is missing; web requests fail closed.");
+    Logger.log("  Set API_TOKEN in Script Properties and keep the matching value in the deployed app configuration.");
+  } else if (API_TOKEN && API_TOKEN_REQUIRED) {
     Logger.log("→ Token enforced: any POST without the matching token is rejected as 'unauthorized'.");
     Logger.log("  Confirm Vercel env VITE_API_TOKEN equals this API_TOKEN, and that this web app was redeployed.");
   }
@@ -1002,14 +1045,16 @@ function _buildPartnerDailyReport(dateYmd) {
     lines.push("Revenue " + _inr(revenue) + " · Avg " + eff + "%");
   }
 
-  var cf = _readCashflow();
+  // Reuse one sheet handle for the cash summary and same-day ledger slice.
+  var cashflowSheet = _cashflowSheet();
+  var cf = _readCashflow(cashflowSheet);
   if (cf && isFinite(cf.totalAvailable)) {
     lines.push("");
     lines.push("🏦 Total cash available " + _inr(cf.totalAvailable));
   }
 
   // Fresh cash-in only — entries recorded for this day. Nothing shown if none.
-  var cashIn = _readCashLedger(dateYmd, dateYmd, "", "in");
+  var cashIn = _readCashLedger(dateYmd, dateYmd, "", "in", cashflowSheet);
   if (cashIn.length) {
     var total = 0;
     for (var j = 0; j < cashIn.length; j++) total += cashIn[j].amount;
@@ -1103,20 +1148,203 @@ function _effectivePending(r) {
  *  H Achieved Pick · I Produced m · J Target mtr · K Efficiency · L State
  *  M Rate per meter · N Produced revenue · O Customer & design code
  */
+function _masterReadResponse(mode, reader) {
+  var startedAt = Date.now();
+  var requestId = _masterReceivablesRequestId();
+  try {
+    return reader();
+  } catch (err) {
+    var code = err && err.code ? String(err.code) : "MASTER_READ_FAILED";
+    var message = err && err.publicMessage
+      ? String(err.publicMessage)
+      : "The requested Partner data is temporarily unavailable.";
+    var totalMs = Date.now() - startedAt;
+    _masterReceivablesLog({
+      event: "master-read",
+      mode: mode,
+      requestId: requestId,
+      ok: false,
+      code: code,
+      totalMs: totalMs
+    });
+    var response = {
+      ok: false,
+      error: code,
+      message: message,
+      meta: {
+        requestId: requestId,
+        servedAt: new Date().toISOString(),
+        timingMs: { total: totalMs }
+      }
+    };
+    if (err && err.safeDetails) response.meta.details = err.safeDetails;
+    return response;
+  }
+}
+
+function _requiredMasterSheet(tabName, minColumns) {
+  var ss;
+  try {
+    ss = SpreadsheetApp.openById(MASTER_SHEET_ID);
+  } catch (err) {
+    throw _masterReceivablesFailure(
+      "MASTER_WORKBOOK_ACCESS",
+      "The master workbook could not be opened. Check its ID and deployment-account access."
+    );
+  }
+  var sh = ss.getSheetByName(tabName);
+  if (!sh) {
+    throw _masterReceivablesFailure(
+      "MASTER_TAB_MISSING",
+      'The required master tab "' + tabName + '" was not found.',
+      { tab: tabName }
+    );
+  }
+  if (minColumns && sh.getMaxColumns() < minColumns) {
+    throw _masterReceivablesFailure(
+      "MASTER_GRID_TOO_NARROW",
+      'The required master tab "' + tabName + '" does not contain all expected columns.',
+      { tab: tabName, maxColumns: sh.getMaxColumns(), requiredColumns: minColumns }
+    );
+  }
+  return sh;
+}
+
 function _masterProduction() {
-  return SpreadsheetApp.openById(MASTER_SHEET_ID).getSheetByName(MASTER_PRODUCTION_TAB);
+  return _requiredMasterSheet(MASTER_PRODUCTION_TAB, 15);
 }
 
 function _masterOrderTab() {
-  return SpreadsheetApp.openById(MASTER_SHEET_ID).getSheetByName(MASTER_ORDER_TAB);
+  return _requiredMasterSheet(MASTER_ORDER_TAB, 1);
 }
 
-function _readMasterRows() {
+function _masterProductionCacheBaseKey() {
+  return [
+    "mp",
+    MASTER_PRODUCTION_CACHE_VERSION,
+    MASTER_SHEET_ID,
+    MASTER_PRODUCTION_TAB
+  ].join(":");
+}
+
+function _readMasterProductionCache() {
+  try {
+    var cache = CacheService.getScriptCache();
+    var manifestText = cache.get(_masterProductionCacheBaseKey() + ":manifest");
+    if (!manifestText) return null;
+    var manifest = JSON.parse(manifestText);
+    if (
+      !manifest ||
+      manifest.cacheVersion !== MASTER_PRODUCTION_CACHE_VERSION ||
+      !Array.isArray(manifest.shardKeys) ||
+      !Array.isArray(manifest.shardBytes) ||
+      manifest.shardKeys.length < 1 ||
+      manifest.shardKeys.length > MASTER_RECEIVABLES_MAX_CACHE_CHUNKS ||
+      manifest.shardKeys.length !== manifest.shardBytes.length
+    ) {
+      return null;
+    }
+    var cached = cache.getAll(manifest.shardKeys);
+    var rows = [];
+    for (var i = 0; i < manifest.shardKeys.length; i++) {
+      var key = manifest.shardKeys[i];
+      var shardText = cached[key];
+      if (!shardText || _masterReceivablesUtf8Bytes(shardText) !== manifest.shardBytes[i]) return null;
+      var shardRows = JSON.parse(shardText);
+      if (!Array.isArray(shardRows)) return null;
+      rows = rows.concat(shardRows);
+    }
+    return rows.length === manifest.rowCount ? rows : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+function _writeMasterProductionCache(rows) {
+  if (!rows || !rows.length) return false;
+  var chunks = [];
+  var current = [];
+  var currentBytes = 2;
+  for (var i = 0; i < rows.length; i++) {
+    var rowJson = JSON.stringify(rows[i]);
+    var rowBytes = _masterReceivablesUtf8Bytes(rowJson);
+    if (rowBytes + 2 > MASTER_RECEIVABLES_CACHE_CHUNK_BYTES) return false;
+    var addedBytes = rowBytes + (current.length ? 1 : 0);
+    if (current.length && currentBytes + addedBytes > MASTER_RECEIVABLES_CACHE_CHUNK_BYTES) {
+      chunks.push(JSON.stringify(current));
+      current = [];
+      currentBytes = 2;
+      addedBytes = rowBytes;
+    }
+    current.push(rows[i]);
+    currentBytes += addedBytes;
+  }
+  if (current.length) chunks.push(JSON.stringify(current));
+  if (!chunks.length || chunks.length > MASTER_RECEIVABLES_MAX_CACHE_CHUNKS) return false;
+
+  try {
+    var cache = CacheService.getScriptCache();
+    var baseKey = _masterProductionCacheBaseKey();
+    var datasetId = _masterReceivablesRequestId();
+    var shardValues = {};
+    var shardKeys = [];
+    var shardBytes = [];
+    for (var c = 0; c < chunks.length; c++) {
+      var chunkBytes = _masterReceivablesUtf8Bytes(chunks[c]);
+      if (chunkBytes > MASTER_RECEIVABLES_CACHE_CHUNK_BYTES) return false;
+      var shardKey = baseKey + ":" + datasetId + ":" + c;
+      shardKeys.push(shardKey);
+      shardBytes.push(chunkBytes);
+      shardValues[shardKey] = chunks[c];
+    }
+    var manifestText = JSON.stringify({
+      cacheVersion: MASTER_PRODUCTION_CACHE_VERSION,
+      rowCount: rows.length,
+      shardKeys: shardKeys,
+      shardBytes: shardBytes
+    });
+    if (_masterReceivablesUtf8Bytes(manifestText) > MASTER_RECEIVABLES_CACHE_CHUNK_BYTES) return false;
+    var manifestKey = baseKey + ":manifest";
+    cache.remove(manifestKey);
+    cache.putAll(shardValues, MASTER_PRODUCTION_CACHE_TTL_SECONDS);
+    cache.put(manifestKey, manifestText, MASTER_PRODUCTION_CACHE_TTL_SECONDS);
+    return true;
+  } catch (err) {
+    _masterReceivablesLog({ event: "master-production-cache", ok: false, code: "CACHE_WRITE_FAILED" });
+    return false;
+  }
+}
+
+function _buildMasterRows() {
   var sh = _masterProduction();
-  if (!sh) return [];
-  var last = sh.getLastRow();
-  if (last < 2) return [];
-  var values = sh.getRange(2, 1, last - 1, 15).getValues(); // A..O
+  var dateHeader = _masterHeaderKey(sh.getRange(1, 1).getDisplayValue());
+  if (dateHeader !== "date") {
+    throw _masterReceivablesFailure(
+      "MASTER_PRODUCTION_SCHEMA_MISMATCH",
+      'The "' + MASTER_PRODUCTION_TAB + '" tab must keep Date in column A.',
+      { tab: MASTER_PRODUCTION_TAB, expectedColumn: "A", expectedHeader: "Date" }
+    );
+  }
+  var rawLastRow = sh.getLastRow();
+  if (rawLastRow > MASTER_PRODUCTION_MAX_GRID_ROWS) {
+    throw _masterReceivablesFailure(
+      "MASTER_PRODUCTION_GRID_TOO_LARGE",
+      "The master production sheet exceeds the reviewed row bound.",
+      { lastRow: rawLastRow, maxRows: MASTER_PRODUCTION_MAX_GRID_ROWS }
+    );
+  }
+  if (rawLastRow < 2) return [];
+
+  // Date is mandatory for every normalized production row. Scan only column A
+  // first so trailing formula/format rows do not force an A:O read.
+  var dateValues = sh.getRange(2, 1, rawLastRow - 1, 1).getValues();
+  var lastDateOffset = -1;
+  for (var dIndex = 0; dIndex < dateValues.length; dIndex++) {
+    if (_toDate(dateValues[dIndex][0])) lastDateOffset = dIndex;
+  }
+  if (lastDateOffset < 0) return [];
+  var dataRows = lastDateOffset + 1;
+  var values = sh.getRange(2, 1, dataRows, 15).getValues(); // A..O, bounded to dated rows
   var out = [];
   for (var i = 0; i < values.length; i++) {
     var r = values[i];
@@ -1145,6 +1373,14 @@ function _readMasterRows() {
     });
   }
   return out;
+}
+
+function _readMasterRows() {
+  var cached = _readMasterProductionCache();
+  if (cached) return cached;
+  var rows = _buildMasterRows();
+  _writeMasterProductionCache(rows);
+  return rows;
 }
 
 function _readMasterDay(dateYmd) {
@@ -1210,77 +1446,1064 @@ function _readMasterOrders() {
  *  AE Receipts · AF Received On · AG Payment status
  *  AN Pending Balance · AP Party
  */
-function _readMasterReceivables() {
-  var sh = SpreadsheetApp.openById(MASTER_SHEET_ID).getSheetByName(MASTER_PAAGU_TAB);
-  if (!sh) return [];
-  var last = sh.getLastRow();
-  if (last < 2) return [];
-  var width = sh.getLastColumn();
-  var header = sh.getRange(1, 1, 1, width).getValues()[0];
-  var normHeader = function (s) { return String(s || "").toLowerCase().replace(/[^a-z0-9]/g, ""); };
-  var headerNorm = [];
-  for (var h = 0; h < header.length; h++) headerNorm.push(normHeader(header[h]));
-  var findCol = function (aliases, fallbackIdx) {
-    for (var a = 0; a < aliases.length; a++) {
-      var want = normHeader(aliases[a]);
-      for (var c = 0; c < headerNorm.length; c++) {
-        if (headerNorm[c] === want) return c;
+function _masterReceivableColumnSpecs() {
+  return [
+    { key: "orderId", aliases: ["Order ID"], index: 0, required: false },
+    { key: "paaguId", aliases: ["Paagu ID", "Paagu"], index: 1, required: true },
+    { key: "customerName", aliases: ["Customer Name", "Design Details"], index: 2, required: true },
+    { key: "status", aliases: ["Status"], index: 4, required: true },
+    {
+      key: "loadedLoom",
+      aliases: ["Looms Allocated", "Loaded Loom", "Loom Allocated"],
+      index: 10,
+      required: false
+    },
+    { key: "invoiceAmount", aliases: ["Invoice amount"], index: 26, required: true },
+    { key: "invoiceNumber", aliases: ["Invoice number"], index: 27, required: true },
+    { key: "invoiceDate", aliases: ["Invoice date"], index: 28, required: true },
+    { key: "dueDate", aliases: ["Due date"], index: 29, required: true },
+    { key: "receipts", aliases: ["Receipts"], index: 30, required: true },
+    { key: "receivedOn", aliases: ["Received On"], index: 31, required: true },
+    { key: "paymentStatus", aliases: ["Payment status"], index: 32, required: true },
+    { key: "pendingBalance", aliases: ["Pending Balance"], index: 39, required: true },
+    { key: "party", aliases: ["Party"], index: 41, required: true }
+  ];
+}
+
+function _masterHeaderKey(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function _masterColumnLetter(index) {
+  var n = index + 1;
+  var out = "";
+  while (n > 0) {
+    var rem = (n - 1) % 26;
+    out = String.fromCharCode(65 + rem) + out;
+    n = Math.floor((n - 1) / 26);
+  }
+  return out;
+}
+
+function _masterReceivablesFailure(code, publicMessage, details) {
+  var err = new Error(publicMessage || "Master receivables could not be read.");
+  err.code = code || "MASTER_RECEIVABLES_READ_FAILED";
+  err.publicMessage = publicMessage || "Master receivables could not be read.";
+  err.safeDetails = details || null;
+  return err;
+}
+
+function _masterReceivablesRequestId() {
+  return Utilities.getUuid().replace(/-/g, "").slice(0, 12);
+}
+
+function _masterSafeIdSuffix(value) {
+  var text = String(value || "");
+  return text ? text.slice(-8) : "";
+}
+
+function _masterReceivablesLog(event) {
+  try {
+    Logger.log(JSON.stringify(event));
+  } catch (err) {
+    Logger.log("master-receivables log unavailable");
+  }
+}
+
+function _parseMasterReceivablesQuery(e) {
+  var p = (e && e.parameter) || {};
+  var rawPageSize = p.pageSize;
+  var paginated = rawPageSize !== undefined && rawPageSize !== null && String(rawPageSize) !== "";
+  var freshText = String(p.fresh || "").toLowerCase();
+  var query = {
+    fresh: freshText === "1" || freshText === "true",
+    paginated: paginated,
+    page: 1,
+    pageSize: 0
+  };
+  if (!paginated) return query;
+
+  if (!/^\d+$/.test(String(rawPageSize))) {
+    throw _masterReceivablesFailure("INVALID_PAGE_SIZE", "pageSize must be a whole number.");
+  }
+  query.pageSize = Number(rawPageSize);
+  if (query.pageSize < 1 || query.pageSize > MASTER_RECEIVABLES_MAX_PAGE_SIZE) {
+    throw _masterReceivablesFailure(
+      "INVALID_PAGE_SIZE",
+      "pageSize must be between 1 and " + MASTER_RECEIVABLES_MAX_PAGE_SIZE + "."
+    );
+  }
+
+  var rawPage = p.page === undefined || p.page === null || String(p.page) === "" ? "1" : String(p.page);
+  if (!/^\d+$/.test(rawPage) || Number(rawPage) < 1) {
+    throw _masterReceivablesFailure("INVALID_PAGE", "page must be a positive whole number.");
+  }
+  query.page = Number(rawPage);
+  return query;
+}
+
+function _masterReceivablesErrorResponse(err, requestId, startedAt) {
+  var code = err && err.code ? String(err.code) : "MASTER_RECEIVABLES_READ_FAILED";
+  var message = err && err.publicMessage
+    ? String(err.publicMessage)
+    : "Master receivables are temporarily unavailable.";
+  var safeDetails = err && err.safeDetails ? err.safeDetails : undefined;
+  var totalMs = Date.now() - startedAt;
+  _masterReceivablesLog({
+    event: "master-receivables",
+    requestId: requestId,
+    ok: false,
+    code: code,
+    totalMs: totalMs
+  });
+  var response = {
+    ok: false,
+    error: code,
+    message: message,
+    meta: {
+      apiVersion: MASTER_RECEIVABLES_API_VERSION,
+      schemaVersion: MASTER_RECEIVABLES_SCHEMA_VERSION,
+      requestId: requestId,
+      servedAt: new Date().toISOString(),
+      timingMs: { total: totalMs }
+    }
+  };
+  if (safeDetails) response.meta.details = safeDetails;
+  return response;
+}
+
+function _masterReceivablesResponse(e) {
+  var startedAt = Date.now();
+  var requestId = _masterReceivablesRequestId();
+  try {
+    var query = _parseMasterReceivablesQuery(e);
+    var dataset = _loadMasterReceivablesDataset({
+      useCache: true,
+      fresh: query.fresh
+    });
+    var rows = dataset.rows;
+    var pagination = null;
+    if (query.paginated) {
+      var totalRows = rows.length;
+      var totalPages = totalRows ? Math.ceil(totalRows / query.pageSize) : 0;
+      var start = (query.page - 1) * query.pageSize;
+      rows = start < totalRows ? rows.slice(start, start + query.pageSize) : [];
+      pagination = {
+        page: query.page,
+        pageSize: query.pageSize,
+        totalRows: totalRows,
+        totalPages: totalPages,
+        hasMore: start + query.pageSize < totalRows,
+        datasetId: dataset.datasetId
+      };
+    }
+
+    var timing = {};
+    var timingSource = dataset.timingMs || {};
+    for (var timingKey in timingSource) timing[timingKey] = timingSource[timingKey];
+    timing.total = Date.now() - startedAt;
+
+    var response = {
+      ok: true,
+      rows: rows,
+      meta: {
+        apiVersion: MASTER_RECEIVABLES_API_VERSION,
+        schemaVersion: MASTER_RECEIVABLES_SCHEMA_VERSION,
+        requestId: requestId,
+        datasetId: dataset.datasetId,
+        generatedAt: dataset.generatedAt,
+        servedAt: new Date().toISOString(),
+        source: dataset.sourceMeta,
+        health: dataset.health,
+        cache: dataset.cache,
+        timingMs: timing
+      }
+    };
+    if (pagination) response.pagination = pagination;
+
+    _masterReceivablesLog({
+      event: "master-receivables",
+      requestId: requestId,
+      ok: true,
+      rows: rows.length,
+      totalRows: dataset.rows.length,
+      cache: dataset.cache.status,
+      sourceIdSuffix: dataset.sourceMeta.spreadsheetIdSuffix,
+      totalMs: timing.total
+    });
+    return response;
+  } catch (err) {
+    return _masterReceivablesErrorResponse(err, requestId, startedAt);
+  }
+}
+
+function _masterReceivablesCacheBaseKey() {
+  return [
+    "mr",
+    MASTER_RECEIVABLES_CACHE_VERSION,
+    MASTER_SHEET_ID,
+    MASTER_PAAGU_TAB
+  ].join(":");
+}
+
+function _masterReceivablesUtf8Bytes(value) {
+  return Utilities.newBlob(String(value || ""), "text/plain").getBytes().length;
+}
+
+function _readMasterReceivablesCache() {
+  var startedAt = Date.now();
+  try {
+    var cache = CacheService.getScriptCache();
+    var manifestText = cache.get(_masterReceivablesCacheBaseKey() + ":manifest");
+    if (!manifestText) return { dataset: null, lookupMs: Date.now() - startedAt };
+    var manifest = JSON.parse(manifestText);
+    if (
+      !manifest ||
+      manifest.cacheVersion !== MASTER_RECEIVABLES_CACHE_VERSION ||
+      !Array.isArray(manifest.shardKeys) ||
+      !Array.isArray(manifest.shardBytes) ||
+      manifest.shardKeys.length < 1 ||
+      manifest.shardKeys.length > MASTER_RECEIVABLES_MAX_CACHE_CHUNKS ||
+      manifest.shardKeys.length !== manifest.shardBytes.length
+    ) {
+      return { dataset: null, lookupMs: Date.now() - startedAt };
+    }
+
+    var cached = cache.getAll(manifest.shardKeys);
+    var rows = [];
+    for (var i = 0; i < manifest.shardKeys.length; i++) {
+      var key = manifest.shardKeys[i];
+      var shardText = cached[key];
+      if (!shardText || _masterReceivablesUtf8Bytes(shardText) !== manifest.shardBytes[i]) {
+        return { dataset: null, lookupMs: Date.now() - startedAt };
+      }
+      var shardRows = JSON.parse(shardText);
+      if (!Array.isArray(shardRows)) {
+        return { dataset: null, lookupMs: Date.now() - startedAt };
+      }
+      rows = rows.concat(shardRows);
+    }
+    if (rows.length !== manifest.rowCount) {
+      return { dataset: null, lookupMs: Date.now() - startedAt };
+    }
+
+    return {
+      dataset: {
+        rows: rows,
+        datasetId: manifest.datasetId,
+        generatedAt: manifest.generatedAt,
+        sourceMeta: manifest.sourceMeta,
+        health: manifest.health,
+        buildTimingMs: manifest.buildTimingMs || {}
+      },
+      lookupMs: Date.now() - startedAt
+    };
+  } catch (err) {
+    return { dataset: null, lookupMs: Date.now() - startedAt };
+  }
+}
+
+function _writeMasterReceivablesCache(dataset) {
+  if (!dataset || !dataset.rows || !dataset.rows.length) return false;
+  var chunks = [];
+  var current = [];
+  var currentBytes = 2; // opening and closing brackets
+
+  for (var i = 0; i < dataset.rows.length; i++) {
+    var rowJson = JSON.stringify(dataset.rows[i]);
+    var rowBytes = _masterReceivablesUtf8Bytes(rowJson);
+    if (rowBytes + 2 > MASTER_RECEIVABLES_CACHE_CHUNK_BYTES) return false;
+    var addedBytes = rowBytes + (current.length ? 1 : 0);
+    if (current.length && currentBytes + addedBytes > MASTER_RECEIVABLES_CACHE_CHUNK_BYTES) {
+      chunks.push(JSON.stringify(current));
+      current = [];
+      currentBytes = 2;
+      addedBytes = rowBytes;
+    }
+    current.push(dataset.rows[i]);
+    currentBytes += addedBytes;
+  }
+  if (current.length) chunks.push(JSON.stringify(current));
+  if (!chunks.length || chunks.length > MASTER_RECEIVABLES_MAX_CACHE_CHUNKS) return false;
+
+  try {
+    var cache = CacheService.getScriptCache();
+    var baseKey = _masterReceivablesCacheBaseKey();
+    var shardValues = {};
+    var shardKeys = [];
+    var shardBytes = [];
+    for (var c = 0; c < chunks.length; c++) {
+      var chunkBytes = _masterReceivablesUtf8Bytes(chunks[c]);
+      if (chunkBytes > MASTER_RECEIVABLES_CACHE_CHUNK_BYTES) return false;
+      var shardKey = baseKey + ":" + dataset.datasetId + ":" + c;
+      shardKeys.push(shardKey);
+      shardBytes.push(chunkBytes);
+      shardValues[shardKey] = chunks[c];
+    }
+
+    var manifest = {
+      cacheVersion: MASTER_RECEIVABLES_CACHE_VERSION,
+      datasetId: dataset.datasetId,
+      generatedAt: dataset.generatedAt,
+      rowCount: dataset.rows.length,
+      shardKeys: shardKeys,
+      shardBytes: shardBytes,
+      sourceMeta: dataset.sourceMeta,
+      health: dataset.health,
+      buildTimingMs: dataset.buildTimingMs || {}
+    };
+    var manifestText = JSON.stringify(manifest);
+    if (_masterReceivablesUtf8Bytes(manifestText) > MASTER_RECEIVABLES_CACHE_CHUNK_BYTES) {
+      return false;
+    }
+
+    var manifestKey = baseKey + ":manifest";
+    cache.remove(manifestKey);
+    cache.putAll(shardValues, MASTER_RECEIVABLES_CACHE_TTL_SECONDS);
+    // Publish the manifest last. Readers ignore orphaned or incomplete shards.
+    cache.put(manifestKey, manifestText, MASTER_RECEIVABLES_CACHE_TTL_SECONDS);
+    return true;
+  } catch (err) {
+    _masterReceivablesLog({ event: "master-receivables-cache", ok: false, code: "CACHE_WRITE_FAILED" });
+    return false;
+  }
+}
+
+function _loadMasterReceivablesDataset(options) {
+  options = options || {};
+  var useCache = options.useCache !== false;
+  var fresh = options.fresh === true;
+  var cacheLookup = { dataset: null, lookupMs: 0 };
+
+  if (useCache && !fresh) {
+    cacheLookup = _readMasterReceivablesCache();
+    if (cacheLookup.dataset) {
+      cacheLookup.dataset.cache = {
+        status: "hit",
+        ageMs: Math.max(0, Date.now() - new Date(cacheLookup.dataset.generatedAt).getTime()),
+        ttlSeconds: MASTER_RECEIVABLES_CACHE_TTL_SECONDS
+      };
+      cacheLookup.dataset.timingMs = {
+        cacheLookup: cacheLookup.lookupMs,
+        total: cacheLookup.lookupMs
+      };
+      return cacheLookup.dataset;
+    }
+  }
+
+  var lock = null;
+  var locked = false;
+  var lockStartedAt = Date.now();
+  if (useCache) {
+    try {
+      lock = LockService.getScriptLock();
+      locked = lock.tryLock(2500);
+    } catch (lockErr) {
+      locked = false;
+    }
+  }
+
+  try {
+    if (locked && !fresh) {
+      var secondLookup = _readMasterReceivablesCache();
+      cacheLookup.lookupMs += secondLookup.lookupMs;
+      if (secondLookup.dataset) {
+        secondLookup.dataset.cache = {
+          status: "hit-after-wait",
+          ageMs: Math.max(0, Date.now() - new Date(secondLookup.dataset.generatedAt).getTime()),
+          ttlSeconds: MASTER_RECEIVABLES_CACHE_TTL_SECONDS
+        };
+        secondLookup.dataset.timingMs = {
+          cacheLookup: cacheLookup.lookupMs,
+          lockWait: Date.now() - lockStartedAt,
+          total: Date.now() - lockStartedAt + cacheLookup.lookupMs
+        };
+        return secondLookup.dataset;
       }
     }
-    return fallbackIdx;
+
+    var dataset = _buildMasterReceivablesDataset();
+    var cacheWriteStartedAt = Date.now();
+    var stored = useCache ? _writeMasterReceivablesCache(dataset) : false;
+    dataset.cache = {
+      status: fresh ? "refresh" : "miss",
+      stored: stored,
+      ttlSeconds: stored ? MASTER_RECEIVABLES_CACHE_TTL_SECONDS : 0
+    };
+    dataset.timingMs = {};
+    var builtTiming = dataset.buildTimingMs || {};
+    for (var key in builtTiming) dataset.timingMs[key] = builtTiming[key];
+    dataset.timingMs.cacheLookup = cacheLookup.lookupMs;
+    dataset.timingMs.lockWait = Date.now() - lockStartedAt;
+    dataset.timingMs.cacheWrite = Date.now() - cacheWriteStartedAt;
+    return dataset;
+  } finally {
+    if (locked && lock) lock.releaseLock();
+  }
+}
+
+function _openMasterReceivablesContext() {
+  var ss;
+  try {
+    ss = SpreadsheetApp.openById(MASTER_SHEET_ID);
+  } catch (err) {
+    throw _masterReceivablesFailure(
+      "MASTER_WORKBOOK_ACCESS",
+      "The master workbook could not be opened. Check its ID and deployment-account access."
+    );
+  }
+  var sh = ss.getSheetByName(MASTER_PAAGU_TAB);
+  if (!sh) {
+    throw _masterReceivablesFailure(
+      "MASTER_TAB_MISSING",
+      'The required master tab "' + MASTER_PAAGU_TAB + '" was not found.'
+    );
+  }
+  if (sh.getMaxColumns() < 42) {
+    throw _masterReceivablesFailure(
+      "MASTER_GRID_TOO_NARROW",
+      'The "' + MASTER_PAAGU_TAB + '" tab must include columns through AP.',
+      { maxColumns: sh.getMaxColumns(), requiredColumns: 42 }
+    );
+  }
+  return { spreadsheet: ss, sheet: sh };
+}
+
+function _resolveMasterReceivablesSchema(sheet) {
+  var width = Math.min(sheet.getLastColumn(), 42);
+  if (width < 1) {
+    throw _masterReceivablesFailure("MASTER_SCHEMA_EMPTY", "The master receivables header row is empty.");
+  }
+  var headers = sheet.getRange(1, 1, 1, width).getDisplayValues()[0];
+  var normalized = [];
+  for (var h = 0; h < headers.length; h++) normalized.push(_masterHeaderKey(headers[h]));
+  var specs = _masterReceivableColumnSpecs();
+  var columns = {};
+  var resolved = {};
+  var warnings = [];
+
+  for (var s = 0; s < specs.length; s++) {
+    var spec = specs[s];
+    var index = spec.index;
+    if (index >= 42) {
+      throw _masterReceivablesFailure(
+        "MASTER_SCHEMA_MAPPING_INVALID",
+        "A configured receivables column is outside the supported A:AP layout.",
+        { field: spec.key, column: _masterColumnLetter(index) }
+      );
+    }
+
+    // A:AP is the established source contract. Header text is diagnostic only:
+    // it must never remap a financial field or block a valid fixed-column read.
+    var acceptedHeaderKeys = [];
+    for (var a = 0; a < spec.aliases.length; a++) {
+      acceptedHeaderKeys.push(_masterHeaderKey(spec.aliases[a]));
+    }
+    var actualHeader = String(headers[index] || "");
+    var headerMatched = acceptedHeaderKeys.indexOf(normalized[index] || "") >= 0;
+    var matchingColumns = [];
+    for (var c = 0; c < normalized.length; c++) {
+      if (acceptedHeaderKeys.indexOf(normalized[c]) >= 0) {
+        matchingColumns.push(_masterColumnLetter(c));
+      }
+    }
+    if (!headerMatched) {
+      warnings.push({
+        code: "FIXED_COLUMN_HEADER_MISMATCH",
+        field: spec.key,
+        column: _masterColumnLetter(index),
+        expectedHeaders: spec.aliases.slice(),
+        actualHeader: actualHeader,
+        matchingHeaderColumns: matchingColumns
+      });
+    } else if (matchingColumns.length > 1) {
+      warnings.push({
+        code: "DUPLICATE_HEADER_IGNORED",
+        field: spec.key,
+        column: _masterColumnLetter(index),
+        matchingHeaderColumns: matchingColumns
+      });
+    }
+
+    columns[spec.key] = index;
+    resolved[spec.key] = {
+      column: _masterColumnLetter(index),
+      header: actualHeader,
+      source: "fixed",
+      headerMatched: headerMatched,
+      required: spec.required
+    };
+  }
+  return { columns: columns, resolved: resolved, warnings: warnings, specs: specs };
+}
+
+function _masterSheetErrorCode(value) {
+  var text = String(value === null || value === undefined ? "" : value).trim().toUpperCase();
+  var codes = ["#REF!", "#N/A", "#VALUE!", "#ERROR!", "#NAME?", "#NUM!", "#DIV/0!", "#NULL!"];
+  for (var i = 0; i < codes.length; i++) {
+    if (text.indexOf(codes[i]) === 0) return codes[i];
+  }
+  return "";
+}
+
+function _masterReceivablesFormulaStats(values, financialFormulas, schema) {
+  var requiredByIndex = {};
+  for (var i = 0; i < schema.specs.length; i++) {
+    var spec = schema.specs[i];
+    if (spec.required && schema.columns[spec.key] !== undefined) {
+      requiredByIndex[schema.columns[spec.key]] = spec.key;
+    }
+  }
+  var requiredFields = {};
+  var requiredErrorCells = 0;
+  var financialErrorCells = 0;
+  for (var r = 0; r < values.length; r++) {
+    if (!String(values[r][schema.columns.party] || "").trim()) continue;
+    var formulaRow = financialFormulas[r] || [];
+    for (var f = 0; f < formulaRow.length; f++) {
+      if (!String(formulaRow[f] || "").trim()) continue;
+      var c = 26 + f; // getFormulas batch is AA:AP
+      if (!_masterSheetErrorCode(values[r][c])) continue;
+      financialErrorCells += 1;
+      if (requiredByIndex[c]) {
+        requiredErrorCells += 1;
+        requiredFields[requiredByIndex[c]] = (requiredFields[requiredByIndex[c]] || 0) + 1;
+      }
+    }
+  }
+  return {
+    requiredErrorCells: requiredErrorCells,
+    requiredFields: requiredFields,
+    financialErrorCells: financialErrorCells
   };
+}
 
-  var cOrderId = findCol(["Order ID"], 0);
-  var cPaaguId = findCol(["Paagu ID", "Paagu"], 1);
-  var cCustomerName = findCol(["Customer Name", "Design Details"], 2);
-  var cStatus = findCol(["Status"], 4);
-  // Looms Allocated lives in column K (index 10) — read by header, but force the
-  // column-K fallback when the header lookup returns the same fixed position.
-  var cLoadedLoom = findCol(["Looms Allocated", "Loaded Loom", "Loom Allocated"], 10);
-  var cInvoiceAmount = findCol(["Invoice amount"], 26);
-  var cInvoiceNumber = findCol(["Invoice number"], 27);
-  var cInvoiceDate = findCol(["Invoice date"], 28);
-  var cDueDate = findCol(["Due date"], 29);
-  var cReceipts = findCol(["Receipts"], 30);
-  var cReceivedOn = findCol(["Received On"], 31);
-  var cPaymentStatus = findCol(["Payment status"], 32);
-  var cPendingBalance = findCol(["Pending Balance"], 39);
-  var cParty = findCol(["Party"], 41);
+function _masterReceivablesBaseHealth(schemaWarnings) {
+  var warnings = (schemaWarnings || []).slice();
+  var copyForwardAvailable = typeof TARGET_SPREADSHEET_ID !== "undefined";
+  var idsMatch = copyForwardAvailable ? String(TARGET_SPREADSHEET_ID) === String(MASTER_SHEET_ID) : null;
+  if (copyForwardAvailable && !idsMatch) {
+    warnings.push({ code: "MASTER_COPY_FORWARD_ID_MISMATCH" });
+  }
+  return {
+    status: warnings.length ? "warning" : "healthy",
+    warnings: warnings,
+    copyForwardConfigured: copyForwardAvailable,
+    idsMatch: idsMatch,
+    copyForwardIdSuffix: copyForwardAvailable ? _masterSafeIdSuffix(TARGET_SPREADSHEET_ID) : ""
+  };
+}
 
-  var values = sh.getRange(2, 1, last - 1, 42).getValues(); // A..AP
+function _buildMasterReceivablesDataset() {
+  var totalStartedAt = Date.now();
+  var timing = {};
+  var stepStartedAt = Date.now();
+  var context = _openMasterReceivablesContext();
+  timing.open = Date.now() - stepStartedAt;
+
+  stepStartedAt = Date.now();
+  var schema = _resolveMasterReceivablesSchema(context.sheet);
+  timing.schema = Date.now() - stepStartedAt;
+  var sh = context.sheet;
+  var rawLastRow = sh.getLastRow();
+  var lastColumn = sh.getLastColumn();
+  if (rawLastRow > MASTER_RECEIVABLES_MAX_GRID_ROWS) {
+    throw _masterReceivablesFailure(
+      "SOURCE_GRID_TOO_LARGE",
+      "The master receivables sheet exceeds the reviewed row bound.",
+      { lastRow: rawLastRow, maxRows: MASTER_RECEIVABLES_MAX_GRID_ROWS }
+    );
+  }
+
+  var sourceMeta = {
+    spreadsheetIdSuffix: _masterSafeIdSuffix(MASTER_SHEET_ID),
+    tabName: MASTER_PAAGU_TAB,
+    rawLastRow: rawLastRow,
+    effectiveLastRow: rawLastRow < 2 ? 1 : 0,
+    lastColumn: lastColumn,
+    maxColumns: sh.getMaxColumns(),
+    rowsRead: 0,
+    rowsReturned: 0,
+    partyRows: 0,
+    invoiceRows: 0,
+    skippedNoParty: 0,
+    skippedEmpty: 0,
+    formulaErrorCells: 0,
+    latestInvoiceDate: "",
+    resolvedColumns: schema.resolved
+  };
+  var health = _masterReceivablesBaseHealth(schema.warnings);
+  if (rawLastRow < 2) {
+    health.warnings.push({ code: "NO_RECEIVABLE_ROWS" });
+    health.status = "warning";
+    timing.totalBuild = Date.now() - totalStartedAt;
+    return {
+      rows: [],
+      datasetId: _masterReceivablesRequestId(),
+      generatedAt: new Date().toISOString(),
+      sourceMeta: sourceMeta,
+      health: health,
+      buildTimingMs: timing
+    };
+  }
+
+  stepStartedAt = Date.now();
+  var partyValues = sh
+    .getRange(2, schema.columns.party + 1, rawLastRow - 1, 1)
+    .getDisplayValues();
+  var lastPartyOffset = -1;
+  for (var p = 0; p < partyValues.length; p++) {
+    if (String(partyValues[p][0] || "").trim()) lastPartyOffset = p;
+  }
+  timing.partyScan = Date.now() - stepStartedAt;
+
+  if (lastPartyOffset < 0) {
+    health.warnings.push({ code: "NO_PARTY_ROWS" });
+    health.status = "warning";
+    timing.totalBuild = Date.now() - totalStartedAt;
+    return {
+      rows: [],
+      datasetId: _masterReceivablesRequestId(),
+      generatedAt: new Date().toISOString(),
+      sourceMeta: sourceMeta,
+      health: health,
+      buildTimingMs: timing
+    };
+  }
+
+  var effectiveLastRow = lastPartyOffset + 2;
+  var dataRows = effectiveLastRow - 1;
+  sourceMeta.effectiveLastRow = effectiveLastRow;
+  if (dataRows > MASTER_RECEIVABLES_MAX_DATA_ROWS) {
+    throw _masterReceivablesFailure(
+      "SOURCE_DATA_TOO_LARGE",
+      "The master receivables dataset exceeds the reviewed row bound.",
+      { meaningfulRows: dataRows, maxRows: MASTER_RECEIVABLES_MAX_DATA_ROWS }
+    );
+  }
+  if (rawLastRow > effectiveLastRow) {
+    health.warnings.push({
+      code: "TRAILING_FORMULA_ROWS_IGNORED",
+      rows: rawLastRow - effectiveLastRow
+    });
+    health.status = "warning";
+  }
+
+  stepStartedAt = Date.now();
+  var values = sh.getRange(2, 1, dataRows, 42).getValues(); // A..AP, bounded above
+  timing.sheetRead = Date.now() - stepStartedAt;
+  sourceMeta.rowsRead = values.length;
+
+  stepStartedAt = Date.now();
+  var financialFormulas = sh.getRange(2, 27, dataRows, 16).getFormulas(); // AA..AP only
+  timing.formulaRead = Date.now() - stepStartedAt;
+  var formulaStats = _masterReceivablesFormulaStats(values, financialFormulas, schema);
+  sourceMeta.formulaErrorCells = formulaStats.financialErrorCells;
+  if (formulaStats.requiredErrorCells > 0) {
+    throw _masterReceivablesFailure(
+      "MASTER_FORMULA_ERRORS",
+      "Required receivables columns contain formula errors.",
+      {
+        errorCells: formulaStats.requiredErrorCells,
+        fields: Object.keys(formulaStats.requiredFields)
+      }
+    );
+  }
+  if (formulaStats.financialErrorCells > 0) {
+    health.warnings.push({
+      code: "OPTIONAL_FINANCIAL_FORMULA_ERRORS",
+      cells: formulaStats.financialErrorCells
+    });
+    health.status = "warning";
+  }
+
+  stepStartedAt = Date.now();
   var out = [];
   for (var i = 0; i < values.length; i++) {
     var r = values[i];
-    var party = String(r[cParty] || "").trim();
-    if (!party) continue;
-    var orderId = String(r[cOrderId] || "").trim(); // retained for backward compatibility
-    var paaguId = String(r[cPaaguId] || "").trim();
-    var customerName = String(r[cCustomerName] || "").trim();
-    var loadedLoom = String(r[cLoadedLoom] || "").trim();
-    var pending = Number(r[cPendingBalance]) || 0;
-    var invoiceAmount = Number(r[cInvoiceAmount]) || 0;
-    var invoiceNumber = String(r[cInvoiceNumber] || "").trim();
-    if (!invoiceNumber && !pending && !invoiceAmount && !customerName && !paaguId) continue;
+    var party = String(r[schema.columns.party] || "").trim();
+    if (!party) {
+      sourceMeta.skippedNoParty += 1;
+      continue;
+    }
+    sourceMeta.partyRows += 1;
+    var orderId = String(r[schema.columns.orderId] || "").trim(); // backward-compatible
+    var paaguId = String(r[schema.columns.paaguId] || "").trim();
+    var customerName = String(r[schema.columns.customerName] || "").trim();
+    var loadedLoom = String(r[schema.columns.loadedLoom] || "").trim();
+    var pending = Number(r[schema.columns.pendingBalance]) || 0;
+    var invoiceAmount = Number(r[schema.columns.invoiceAmount]) || 0;
+    var invoiceNumber = String(r[schema.columns.invoiceNumber] || "").trim();
+    if (!invoiceNumber && !pending && !invoiceAmount && !customerName && !paaguId) {
+      sourceMeta.skippedEmpty += 1;
+      continue;
+    }
+    if (invoiceNumber) sourceMeta.invoiceRows += 1;
+    var invoiceDate = r[schema.columns.invoiceDate]
+      ? _ymd(_toDate(r[schema.columns.invoiceDate]) || new Date(r[schema.columns.invoiceDate]))
+      : "";
+    if (invoiceDate && invoiceDate > sourceMeta.latestInvoiceDate) {
+      sourceMeta.latestInvoiceDate = invoiceDate;
+    }
     out.push({
       orderId: orderId,
       paaguId: paaguId,
       customerName: customerName,
       loadedLoom: loadedLoom,
-      designDetails: customerName, // backward-compatible alias consumed by older UI
-      loomNumber: loadedLoom,      // backward-compatible alias consumed by older UI
-      status: String(r[cStatus] || ""),
+      designDetails: customerName,
+      loomNumber: loadedLoom,
+      status: String(r[schema.columns.status] || ""),
       invoiceAmount: invoiceAmount,
       invoiceNumber: invoiceNumber,
-      invoiceDate: r[cInvoiceDate] ? _ymd(_toDate(r[cInvoiceDate]) || new Date(r[cInvoiceDate])) : "",
-      dueDate: r[cDueDate] ? _ymd(_toDate(r[cDueDate]) || new Date(r[cDueDate])) : "",
-      receipts: Number(r[cReceipts]) || 0,
-      receivedOn: r[cReceivedOn] ? _ymd(_toDate(r[cReceivedOn]) || new Date(r[cReceivedOn])) : "",
-      paymentStatus: String(r[cPaymentStatus] || "").trim(),
+      invoiceDate: invoiceDate,
+      dueDate: r[schema.columns.dueDate]
+        ? _ymd(_toDate(r[schema.columns.dueDate]) || new Date(r[schema.columns.dueDate]))
+        : "",
+      receipts: Number(r[schema.columns.receipts]) || 0,
+      receivedOn: r[schema.columns.receivedOn]
+        ? _ymd(_toDate(r[schema.columns.receivedOn]) || new Date(r[schema.columns.receivedOn]))
+        : "",
+      paymentStatus: String(r[schema.columns.paymentStatus] || "").trim(),
       pendingBalance: pending,
       party: party
     });
   }
-  return out;
+  timing.normalize = Date.now() - stepStartedAt;
+  sourceMeta.rowsReturned = out.length;
+  if (!out.length) {
+    health.warnings.push({ code: "NO_RECEIVABLE_ROWS" });
+    health.status = "warning";
+  }
+  timing.totalBuild = Date.now() - totalStartedAt;
+  return {
+    rows: out,
+    datasetId: _masterReceivablesRequestId(),
+    generatedAt: new Date().toISOString(),
+    sourceMeta: sourceMeta,
+    health: health,
+    buildTimingMs: timing
+  };
+}
+
+// Compatibility wrapper used by the daily Partner digest. It receives the
+// same normalized rows as the web endpoint and shares its short server cache.
+function _readMasterReceivables() {
+  return _loadMasterReceivablesDataset({ useCache: true, fresh: false }).rows;
+}
+
+function _latestMasterProductionDateHealth(spreadsheet) {
+  var sh = spreadsheet.getSheetByName(MASTER_PRODUCTION_TAB);
+  if (!sh) return { latestDate: "", rowsChecked: 0, literalDateRows: 0, ignoredFormulaRows: 0 };
+  var last = sh.getLastRow();
+  if (last < 2) return { latestDate: "", rowsChecked: 0, literalDateRows: 0, ignoredFormulaRows: 0 };
+  if (last > MASTER_PRODUCTION_MAX_GRID_ROWS) {
+    return {
+      latestDate: "",
+      rowsChecked: 0,
+      literalDateRows: 0,
+      ignoredFormulaRows: 0,
+      error: "MASTER_PRODUCTION_GRID_TOO_LARGE"
+    };
+  }
+  var count = last - 1;
+  var dateRange = sh.getRange(2, 1, count, 1);
+  var values = dateRange.getValues();
+  var formulas = dateRange.getFormulas();
+  var latest = "";
+  var latestMs = 0;
+  var literalDateRows = 0;
+  var ignoredFormulaRows = 0;
+  for (var i = 0; i < values.length; i++) {
+    if (formulas[i] && String(formulas[i][0] || "").trim()) {
+      ignoredFormulaRows += 1;
+      continue;
+    }
+    var d = _toDate(values[i][0]);
+    if (d) {
+      literalDateRows += 1;
+      if (d.getTime() <= latestMs) continue;
+      latestMs = d.getTime();
+      latest = _ymd(d);
+    }
+  }
+  return {
+    latestDate: latest,
+    rowsChecked: count,
+    literalDateRows: literalDateRows,
+    ignoredFormulaRows: ignoredFormulaRows
+  };
+}
+
+function _masterWorkbookLayoutHealth(spreadsheet) {
+  var requiredTabs = [
+    MASTER_PRODUCTION_TAB,
+    MASTER_ORDER_TAB,
+    MASTER_PAAGU_TAB,
+    MASTER_CASHFLOW_TAB,
+    MASTER_CAPEX_TAB
+  ];
+  var tabs = {};
+  var errors = [];
+  for (var i = 0; i < requiredTabs.length; i++) {
+    var tabName = requiredTabs[i];
+    tabs[tabName] = !!spreadsheet.getSheetByName(tabName);
+    if (!tabs[tabName]) errors.push({ code: "REQUIRED_TAB_MISSING", tab: tabName });
+  }
+
+  var productionSheet = spreadsheet.getSheetByName(MASTER_PRODUCTION_TAB);
+  var productionLayout = null;
+  var productionDates = { latestDate: "", rowsChecked: 0, literalDateRows: 0, ignoredFormulaRows: 0 };
+  if (productionSheet) {
+    productionLayout = {
+      maxColumns: productionSheet.getMaxColumns(),
+      rawLastRow: productionSheet.getLastRow(),
+      dateHeader: String(productionSheet.getRange(1, 1).getDisplayValue() || "")
+    };
+    if (productionLayout.maxColumns < 15) {
+      errors.push({
+        code: "MASTER_PRODUCTION_GRID_TOO_NARROW",
+        tab: MASTER_PRODUCTION_TAB,
+        maxColumns: productionLayout.maxColumns,
+        requiredColumns: 15
+      });
+    }
+    if (_masterHeaderKey(productionLayout.dateHeader) !== "date") {
+      errors.push({
+        code: "MASTER_PRODUCTION_SCHEMA_MISMATCH",
+        tab: MASTER_PRODUCTION_TAB,
+        expectedColumn: "A",
+        expectedHeader: "Date"
+      });
+    }
+    if (productionLayout.rawLastRow > MASTER_PRODUCTION_MAX_GRID_ROWS) {
+      errors.push({
+        code: "MASTER_PRODUCTION_GRID_TOO_LARGE",
+        tab: MASTER_PRODUCTION_TAB,
+        lastRow: productionLayout.rawLastRow,
+        maxRows: MASTER_PRODUCTION_MAX_GRID_ROWS
+      });
+    } else {
+      productionDates = _latestMasterProductionDateHealth(spreadsheet);
+    }
+  }
+
+  var cashflowSheet = spreadsheet.getSheetByName(MASTER_CASHFLOW_TAB);
+  var cashflowLayout = null;
+  if (cashflowSheet) {
+    cashflowLayout = {
+      maxColumns: cashflowSheet.getMaxColumns(),
+      maxRows: cashflowSheet.getMaxRows()
+    };
+    if (cashflowLayout.maxColumns < 20) {
+      errors.push({
+        code: "MASTER_CASHFLOW_GRID_TOO_NARROW",
+        tab: MASTER_CASHFLOW_TAB,
+        maxColumns: cashflowLayout.maxColumns,
+        requiredColumns: 20
+      });
+    }
+    if (cashflowLayout.maxRows < CF_LEDGER_START_ROW) {
+      errors.push({
+        code: "MASTER_CASHFLOW_LAYOUT_TOO_SHORT",
+        tab: MASTER_CASHFLOW_TAB,
+        maxRows: cashflowLayout.maxRows,
+        requiredRows: CF_LEDGER_START_ROW
+      });
+    }
+  }
+
+  var capexSheet = spreadsheet.getSheetByName(MASTER_CAPEX_TAB);
+  var capexLayout = null;
+  if (capexSheet) {
+    capexLayout = { maxColumns: capexSheet.getMaxColumns() };
+    if (capexLayout.maxColumns < CAPEX_WIDTH) {
+      errors.push({
+        code: "MASTER_CAPEX_GRID_TOO_NARROW",
+        tab: MASTER_CAPEX_TAB,
+        maxColumns: capexLayout.maxColumns,
+        requiredColumns: CAPEX_WIDTH
+      });
+    }
+  }
+
+  return {
+    requiredTabs: tabs,
+    errors: errors,
+    production: productionDates,
+    layouts: {
+      production: productionLayout,
+      cashflow: cashflowLayout,
+      capex: capexLayout
+    }
+  };
+}
+
+function _masterWorkbookHealthResponse(e) {
+  var startedAt = Date.now();
+  var requestId = _masterReceivablesRequestId();
+  try {
+    var query = _parseMasterReceivablesQuery(e);
+    var dataset = _loadMasterReceivablesDataset({ useCache: true, fresh: query.fresh });
+    var openStartedAt = Date.now();
+    var spreadsheet;
+    try {
+      spreadsheet = SpreadsheetApp.openById(MASTER_SHEET_ID);
+    } catch (openErr) {
+      throw _masterReceivablesFailure(
+        "MASTER_WORKBOOK_ACCESS",
+        "The master workbook could not be opened. Check its ID and deployment-account access."
+      );
+    }
+    var healthOpenMs = Date.now() - openStartedAt;
+    var layoutStartedAt = Date.now();
+    var layout = _masterWorkbookLayoutHealth(spreadsheet);
+    var layoutMs = Date.now() - layoutStartedAt;
+    var errors = layout.errors;
+    var warnings = (dataset.health.warnings || []).slice();
+    var production = layout.production;
+    var productionLayoutInvalid = false;
+    for (var i = 0; i < errors.length; i++) {
+      if (String(errors[i].code || "").indexOf("MASTER_PRODUCTION_") === 0) {
+        productionLayoutInvalid = true;
+        break;
+      }
+    }
+    if (!production.latestDate && !productionLayoutInvalid) {
+      warnings.push({ code: "PRODUCTION_DATE_UNAVAILABLE" });
+    }
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+    var latestProductionDate = production.latestDate ? _ymdToDate(production.latestDate) : null;
+    if (
+      production.latestDate &&
+      latestProductionDate &&
+      Math.floor((today.getTime() - latestProductionDate.getTime()) / 86400000) > 3
+    ) {
+      warnings.push({ code: "PRODUCTION_DATA_STALE", latestDate: production.latestDate });
+    }
+
+    var health = {
+      status: errors.length ? "unhealthy" : warnings.length ? "warning" : "healthy",
+      errors: errors,
+      warnings: warnings,
+      spreadsheetIdSuffix: _masterSafeIdSuffix(MASTER_SHEET_ID),
+      copyForwardConfigured: dataset.health.copyForwardConfigured,
+      copyForwardIdSuffix: dataset.health.copyForwardIdSuffix,
+      idsMatch: dataset.health.idsMatch,
+      requiredTabs: layout.requiredTabs,
+      layouts: layout.layouts,
+      latestProductionDate: production.latestDate,
+      productionRowsChecked: production.rowsChecked,
+      productionLiteralDateRows: production.literalDateRows,
+      productionFormulaRowsIgnored: production.ignoredFormulaRows,
+      receivables: {
+        tabName: dataset.sourceMeta.tabName,
+        rawLastRow: dataset.sourceMeta.rawLastRow,
+        effectiveLastRow: dataset.sourceMeta.effectiveLastRow,
+        rowsRead: dataset.sourceMeta.rowsRead,
+        rowsReturned: dataset.sourceMeta.rowsReturned,
+        partyRows: dataset.sourceMeta.partyRows,
+        invoiceRows: dataset.sourceMeta.invoiceRows,
+        formulaErrorCells: dataset.sourceMeta.formulaErrorCells,
+        latestInvoiceDate: dataset.sourceMeta.latestInvoiceDate,
+        resolvedColumns: dataset.sourceMeta.resolvedColumns
+      }
+    };
+    var healthOk = errors.length === 0;
+    var totalMs = Date.now() - startedAt;
+    _masterReceivablesLog({
+      event: "master-health",
+      requestId: requestId,
+      ok: healthOk,
+      status: health.status,
+      errorCount: errors.length,
+      warningCount: warnings.length,
+      totalMs: totalMs
+    });
+    var response = {
+      ok: healthOk,
+      health: health,
+      meta: {
+        apiVersion: MASTER_RECEIVABLES_API_VERSION,
+        schemaVersion: MASTER_RECEIVABLES_SCHEMA_VERSION,
+        requestId: requestId,
+        datasetId: dataset.datasetId,
+        generatedAt: dataset.generatedAt,
+        servedAt: new Date().toISOString(),
+        cache: dataset.cache,
+        timingMs: {
+          healthOpen: healthOpenMs,
+          layoutChecks: layoutMs,
+          total: totalMs
+        }
+      }
+    };
+    if (!healthOk) {
+      response.error = "MASTER_HEALTH_FAILED";
+      response.message = "The master workbook is missing a required tab or layout.";
+    }
+    return response;
+  } catch (err) {
+    return _masterReceivablesErrorResponse(err, requestId, startedAt);
+  }
+}
+
+// Read-only editor diagnostic for monthly rollover. It never writes to Sheets.
+function diagnoseMasterWorkbook() {
+  var result = _masterWorkbookHealthResponse({ parameter: { fresh: "1" } });
+  Logger.log(JSON.stringify(result));
+  return result;
+}
+
+// Authenticated deployment diagnostic for monthly rollover. WEB_APP_URL must
+// be the exact production /exec URL used by the frontend. This avoids
+// ScriptApp.getService().getUrl() selecting a different/restricted deployment
+// when a project has multiple web-app deployments. API_TOKEN stays in the POST
+// body and is never placed in a URL or written to the execution log.
+function diagnoseDeployedMasterHealth() {
+  var scriptProperties = PropertiesService.getScriptProperties();
+  var webAppUrl = String(scriptProperties.getProperty("WEB_APP_URL") || "").trim();
+  var token = String(scriptProperties.getProperty("API_TOKEN") || "");
+  if (!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/i.test(webAppUrl)) {
+    throw new Error("Set WEB_APP_URL to the exact production Apps Script /exec URL before running the deployed health check.");
+  }
+  if (!token) {
+    throw new Error("Set API_TOKEN before running the authenticated deployment health check.");
+  }
+
+  var deploymentIdMatch = webAppUrl.match(/\/s\/([^/]+)\/exec$/i);
+  var deploymentId = deploymentIdMatch ? deploymentIdMatch[1] : "";
+
+  var response = UrlFetchApp.fetch(webAppUrl, {
+    method: "post",
+    contentType: "application/json",
+    payload: JSON.stringify({ kind: "master-health", fresh: true, token: token }),
+    followRedirects: true,
+    muteHttpExceptions: true
+  });
+  var httpStatus = response.getResponseCode();
+  var result;
+  try {
+    result = JSON.parse(response.getContentText());
+  } catch (parseErr) {
+    result = { ok: false, error: "NON_JSON_HEALTH_RESPONSE" };
+  }
+  Logger.log(JSON.stringify({
+    event: "deployed-master-health",
+    deploymentIdSuffix: _masterSafeIdSuffix(deploymentId),
+    httpStatus: httpStatus,
+    ok: result.ok === true,
+    error: result.error || "",
+    health: result.health || null,
+    meta: result.meta || null
+  }));
+  if (httpStatus < 200 || httpStatus >= 300 || result.ok !== true) {
+    if (httpStatus === 401) {
+      throw new Error("The WEB_APP_URL deployment returned HTTP 401; verify that it is the app's public /exec deployment.");
+    }
+    throw new Error("Deployed master health check failed; review the sanitized execution log.");
+  }
+  return result;
 }
 
 function _normEff(v) {
@@ -1301,63 +2524,58 @@ function _ymdToDate(s) {
 /* ------------------------------ master workbook · cashflow ------------------------------ */
 
 function _cashflowSheet() {
-  return SpreadsheetApp.openById(MASTER_SHEET_ID).getSheetByName(MASTER_CASHFLOW_TAB);
+  return _requiredMasterSheet(MASTER_CASHFLOW_TAB, 20);
 }
 
-function _readCashflow() {
-  var sh = _cashflowSheet();
-  if (!sh) return null;
+function _readCashflow(sheet) {
+  var sh = sheet || _cashflowSheet();
 
-  // Closing balances (row 10)
-  var tmb         = Number(sh.getRange(CF_ROW_CLOSING, CF_COL_TMB).getValue())      || 0;
-  var iobCa       = Number(sh.getRange(CF_ROW_CLOSING, CF_COL_IOB_CA).getValue())   || 0;
-  var cashbookApp = Number(sh.getRange(CF_ROW_CLOSING, CF_COL_CASHBOOK).getValue()) || 0;
-  var cash        = Number(sh.getRange(CF_ROW_CLOSING, CF_COL_CASH).getValue())     || 0;
-  var iobCcRaw    = Number(sh.getRange(CF_ROW_CLOSING, CF_COL_IOB_CC).getValue())   || 0;
+  // One row read covers all five closing balances (E:O).
+  var closing = sh
+    .getRange(CF_ROW_CLOSING, CF_COL_TMB_CREDIT, 1, CF_COL_IOB_CC_INTEREST - CF_COL_TMB_CREDIT + 1)
+    .getValues()[0];
+  var tmb         = Number(closing[CF_COL_TMB - CF_COL_TMB_CREDIT])        || 0;
+  var iobCa       = Number(closing[CF_COL_IOB_CA - CF_COL_TMB_CREDIT])     || 0;
+  var cashbookApp = Number(closing[CF_COL_CASHBOOK - CF_COL_TMB_CREDIT])  || 0;
+  var cash        = Number(closing[CF_COL_CASH - CF_COL_TMB_CREDIT])      || 0;
+  var iobCcRaw    = Number(closing[CF_COL_IOB_CC - CF_COL_TMB_CREDIT])     || 0;
   var iobCcUsed   = Math.abs(iobCcRaw);
   var iobCcAvailable = Math.max(0, CF_IOB_CC_LIMIT - iobCcUsed);
   var totalAvailable = tmb + iobCa + cashbookApp + cash + iobCcAvailable;
 
-  // Monthly summary cells
-  var opInflow      = Number(sh.getRange(CF_CELL_OP_INFLOW).getValue())  || 0;
-  var opOutflowVal  = Number(sh.getRange(CF_CELL_OP_OUTFLOW).getValue()) || 0;
+  // R3:T3 is contiguous, so fetch the monthly summary in one call.
+  var monthlySummary = sh.getRange(3, 18, 1, 3).getValues()[0];
+  var opInflow      = Number(monthlySummary[0]) || 0;
+  var opOutflowVal  = Number(monthlySummary[1]) || 0;
   var opOutflow     = opOutflowVal > 0 ? -opOutflowVal : opOutflowVal; // ensure negative
-  var opCashflowNet = Number(sh.getRange(CF_CELL_OP_NET).getValue());
+  var opCashflowNet = Number(monthlySummary[2]);
   if (!isFinite(opCashflowNet)) opCashflowNet = opInflow + opOutflow;
 
-  // CC drawn this month = sum of column M (Withdrawal) for current-month entries.
-  // Sheet stores withdrawals as positive numbers in M, so just sum them.
+  // Read A:O once. The same rows provide both current-month CC withdrawals and
+  // the most recent ledger date used by the summary.
   var ccDrawn = 0;
   var lastRow = sh.getLastRow();
+  var ledgerValues = [];
   if (lastRow >= CF_LEDGER_START_ROW) {
     var n = lastRow - CF_LEDGER_START_ROW + 1;
-    var ledgerDates = sh.getRange(CF_LEDGER_START_ROW, CF_LEDGER_DATE_COL, n, 1).getValues();
-    var ledgerCc    = sh.getRange(CF_LEDGER_START_ROW, CF_COL_IOB_CC_DRAWN, n, 1).getValues();
-    var nowD = new Date();
-    var curY = nowD.getFullYear();
-    var curM = nowD.getMonth();
-    for (var k = 0; k < n; k++) {
-      var dRow = _toDate(ledgerDates[k][0]);
-      if (!dRow) continue;
-      if (dRow.getFullYear() !== curY || dRow.getMonth() !== curM) continue;
-      var v = Number(ledgerCc[k][0]);
-      if (!v || isNaN(v)) continue;
-      ccDrawn += Math.abs(v);
-    }
+    ledgerValues = sh.getRange(CF_LEDGER_START_ROW, 1, n, CF_LEDGER_WIDTH).getValues();
   }
 
-  // As-of date — use the most recent ledger entry; fall back to today.
   var lastEntry = "";
-  var last = sh.getLastRow();
-  if (last >= CF_LEDGER_START_ROW) {
-    var dates = sh.getRange(CF_LEDGER_START_ROW, CF_LEDGER_DATE_COL, last - CF_LEDGER_START_ROW + 1, 1).getValues();
-    var maxMs = 0;
-    for (var i = 0; i < dates.length; i++) {
-      var d = _toDate(dates[i][0]);
-      if (d && d.getTime() > maxMs) maxMs = d.getTime();
+  var maxMs = 0;
+  var nowD = new Date();
+  var curY = nowD.getFullYear();
+  var curM = nowD.getMonth();
+  for (var i = 0; i < ledgerValues.length; i++) {
+    var d = _toDate(ledgerValues[i][CF_LEDGER_DATE_COL - 1]);
+    if (!d) continue;
+    if (d.getTime() > maxMs) maxMs = d.getTime();
+    if (d.getFullYear() === curY && d.getMonth() === curM) {
+      var ccValue = Number(ledgerValues[i][CF_COL_IOB_CC_DRAWN - 1]);
+      if (ccValue && !isNaN(ccValue)) ccDrawn += Math.abs(ccValue);
     }
-    if (maxMs) lastEntry = _ymd(new Date(maxMs));
   }
+  if (maxMs) lastEntry = _ymd(new Date(maxMs));
   if (!lastEntry) lastEntry = _ymd(new Date());
   var asOfDate = lastEntry;
 
@@ -1386,9 +2604,8 @@ function _readCashflow() {
   };
 }
 
-function _readCashLedger(fromYmd, toYmd, accountKey, direction) {
-  var sh = _cashflowSheet();
-  if (!sh) return [];
+function _readCashLedger(fromYmd, toYmd, accountKey, direction, sheet) {
+  var sh = sheet || _cashflowSheet();
   var last = sh.getLastRow();
   if (last < CF_LEDGER_START_ROW) return [];
 
@@ -1461,13 +2678,12 @@ function _readCashLedger(fromYmd, toYmd, accountKey, direction) {
 /* ------------------------------ master workbook · capex (New Shed) ------------------------------ */
 
 function _capexSheet() {
-  return SpreadsheetApp.openById(MASTER_SHEET_ID).getSheetByName(MASTER_CAPEX_TAB);
+  return _requiredMasterSheet(MASTER_CAPEX_TAB, CAPEX_WIDTH);
 }
 
 function _readCapex(projectFilter) {
   var empty = { project: projectFilter, total: 0, count: 0, byFunding: {}, byExpense: {}, byPaidFrom: {}, rows: [] };
   var sh = _capexSheet();
-  if (!sh) return empty;
   var last = sh.getLastRow();
   if (last < 1) return empty;
 

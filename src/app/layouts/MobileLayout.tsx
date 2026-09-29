@@ -1,6 +1,8 @@
 import { Outlet, NavLink, useNavigate, useLocation } from "react-router";
 import { ArrowLeft, House, SquaresFour, Cylinder, Scroll, type Icon } from "@phosphor-icons/react";
-import { ToastHost } from "../components/Toast";
+import { showToast, ToastHost } from "../components/Toast";
+import { logoutSession } from "../lib/authClient";
+import { clearAllSheetCache } from "../lib/sheetSync";
 
 export function MobileLayout() {
   const navigate = useNavigate();
@@ -12,6 +14,16 @@ export function MobileLayout() {
   // pending, new-loading, logs, a single design) stay focused with a back/home
   // header instead.
   const isTopLevel = isHome || isBeams || isDesignsList;
+
+  async function exit() {
+    const loggedOut = await logoutSession();
+    if (!loggedOut) {
+      showToast("Could not sign out. Check the connection and try again.");
+      return;
+    }
+    clearAllSheetCache();
+    navigate("/role", { replace: true });
+  }
 
   let title = "";
   if (isHome) title = "Looms";
@@ -27,7 +39,11 @@ export function MobileLayout() {
   return (
     <div className="h-[100svh] bg-white flex flex-col max-w-md mx-auto relative border-x border-[var(--color-border-hairline)]">
       <header className="h-14 bg-white border-b border-[var(--color-border-hairline)] flex items-center px-4 shrink-0">
-        {!isTopLevel && (
+        {isTopLevel ? (
+          <button onClick={() => void exit()} className="p-2 -ml-2 mr-2 text-[var(--color-text-primary)]" aria-label="Exit Supervisor">
+            <ArrowLeft className="w-5 h-5" weight="bold" />
+          </button>
+        ) : (
           <button onClick={() => navigate(-1)} className="p-2 -ml-2 mr-2 text-[var(--color-text-primary)]" aria-label="Back">
             <ArrowLeft className="w-5 h-5" weight="bold" />
           </button>
@@ -100,4 +116,3 @@ function TabLink({
     </NavLink>
   );
 }
-

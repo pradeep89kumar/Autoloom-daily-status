@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { CaretLeft, CaretRight, CaretDown, CaretUp } from "@phosphor-icons/react";
-import { fetchMasterDay, type MasterRow } from "../../lib/sheetSync";
+import { SheetDataStatus } from "../../components/SheetDataStatus";
+import { useSheetResource } from "../../hooks/useSheetResource";
+import {
+  fetchMasterDayResult,
+  peekMasterDayCache,
+  type MasterRow,
+} from "../../lib/sheetSync";
 import {
   summarizeDay,
   perLoomTotals,
@@ -46,29 +52,18 @@ export function PartnerDay() {
     d.setDate(d.getDate() - 1);
     return d;
   });
-  const [rows, setRows] = useState<MasterRow[] | null>(null);
-  const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const selectedDate = ymd(date);
+  const dayResource = useSheetResource({
+    resourceKey: `partner:day:${selectedDate}`,
+    load: () => fetchMasterDayResult(selectedDate),
+    peek: () => peekMasterDayCache(selectedDate),
+  });
+  const { data: rows, loading } = dayResource;
 
   useEffect(() => {
-    let alive = true;
-    setLoading(true);
     setExpanded(null);
-    const startedAt = Date.now();
-    fetchMasterDay(ymd(date)).then((r) => {
-      if (!alive) return;
-      const elapsed = Date.now() - startedAt;
-      const wait = Math.max(0, 400 - elapsed);
-      setTimeout(() => {
-        if (!alive) return;
-        setRows(r);
-        setLoading(false);
-      }, wait);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [date]);
+  }, [selectedDate]);
 
   const summary = useMemo(() => summarizeDay(rows || []), [rows]);
   const looms = useMemo(() => perLoomTotals(rows || []), [rows]);
@@ -130,10 +125,19 @@ export function PartnerDay() {
         </button>
       </div>
 
+      <SheetDataStatus
+        error={dayResource.error}
+        warning={dayResource.warning}
+        refreshing={dayResource.refreshing}
+        lastSyncedAt={dayResource.lastSyncedAt}
+        onRetry={dayResource.refresh}
+        className="mb-4"
+      />
+
       {/* Header brief */}
       {loading ? (
         <SkeletonHeader />
-      ) : summary.loomsReporting === 0 ? null : (
+      ) : rows === null || summary.loomsReporting === 0 ? null : (
         <>
           <div className="rounded-xl bg-white border border-[var(--color-border-hairline)] shadow-[0_2px_8px_rgba(0,0,0,0.06)] px-4 py-3.5 mb-5">
             <p className="text-[16px] leading-relaxed text-[var(--color-text-primary)]">
@@ -158,7 +162,7 @@ export function PartnerDay() {
       {/* Per-loom rows */}
       {loading ? (
         <SkeletonRows />
-      ) : looms.length === 0 || summary.loomsReporting === 0 ? (
+      ) : rows === null ? null : looms.length === 0 || summary.loomsReporting === 0 ? (
         <EmptyState date={date} inProgress={inProgress} />
       ) : (
         <>
