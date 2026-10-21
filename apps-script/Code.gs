@@ -60,7 +60,7 @@ var MASTER_RECEIVABLES_MAX_PAGE_SIZE = 250;
 var MASTER_PRODUCTION_CACHE_VERSION = "master-production-v1";
 var MASTER_PRODUCTION_CACHE_TTL_SECONDS = 120;
 var MASTER_PRODUCTION_MAX_GRID_ROWS = 50000;
-var MASTER_UNBILLED_CACHE_VERSION = "master-unbilled-v2";
+var MASTER_UNBILLED_CACHE_VERSION = "master-unbilled-v3";
 var MASTER_UNBILLED_CACHE_TTL_SECONDS = 120;
 var MASTER_UNBILLED_GST_RATE = 0.05;
 var MASTER_RECEIVABLES_CACHE_LOCK_WAIT_MS = 24000;
@@ -1509,7 +1509,6 @@ function _masterUnbilledCacheKey() {
     "mu",
     MASTER_UNBILLED_CACHE_VERSION,
     MASTER_SHEET_ID,
-    MASTER_PRODUCTION_TAB,
     MASTER_PAAGU_TAB
   ].join(":");
 }
@@ -1570,41 +1569,79 @@ function _masterUnbilledPaaguKey(value) {
   return _masterUnbilledText(value).toUpperCase();
 }
 
-function _masterUnbilledInvoiceKey(value) {
-  // Preserve meaningful separators inside an invoice ID. Only surrounding
-  // whitespace/case and repeated whitespace are normalized for de-duplication.
-  return _masterUnbilledText(value).toUpperCase();
+function _masterUnbilledNumber(value) {
+  var number = typeof value === "number"
+    ? value
+    : Number(String(value || "").replace(/[₹,\s]/g, ""));
+  return isFinite(number) ? Math.max(0, number) : 0;
 }
 
-function _masterUnbilledIsRunout(value) {
-  var state = String(value || "").toUpperCase().replace(/[^A-Z]/g, "");
-  return state === "RUNOUT" || state === "COMPLETED" || state === "COMPLITED";
+// Unbilled uses the Paagu ID sheet's fixed operational source contract. It is
+// intentionally independent from the existing receivables schema so these
+// additional columns cannot alter Party/Invoice views:
+// B Paagu ID · C Customer/design · E Completion date · K Loom allocated
+// T Total value · Z OK mtr · AB Invoice number · AG Payment status.
+function _masterUnbilledNormalizePaaguRow(row, sheetRow, billedPaagus) {
+  var fields = {
+    paaguId: row[1],
+    customerDesign: row[2],
+    completionDate: row[4],
+    loom: row[10],
+    totalValue: row[19],
+    okMeters: row[25],
+    invoiceNumber: row[27],
+    paymentStatus: row[32]
+  };
+  var errorFields = [];
+  for (var field in fields) {
+    if (Object.prototype.hasOwnProperty.call(fields, field) && _masterSheetErrorCode(fields[field])) {
+      errorFields.push(field);
+    }
+  }
+  if (errorFields.length) {
+    throw _masterReceivablesFailure(
+      "MASTER_FORMULA_ERRORS",
+      "Required unbilled columns contain formula errors.",
+      { row: sheetRow, fields: errorFields }
+    );
+  }
+
+  var paaguId = _masterUnbilledText(fields.paaguId);
+  var customerDesign = _masterUnbilledText(fields.customerDesign);
+  // Copied template rows have a generated Paagu ID but no customer/design.
+  if (!paaguId || !customerDesign) return null;
+
+  // A real invoice number always wins, even if Payment status was not updated.
+  var paaguKey = _masterUnbilledPaaguKey(paaguId);
+  if (
+    (billedPaagus && billedPaagus[paaguKey]) ||
+    _hasRealInvoice(_masterUnbilledText(fields.invoiceNumber))
+  ) {
+    return null;
+  }
+
+  var paymentStatus = _masterUnbilledKey(fields.paymentStatus);
+  // The source contract has two unbilled states: explicit Unbilled means the
+  // warp is complete; blank means it is still running. Other states are billed
+  // or otherwise outside this report.
+  if (paymentStatus && paymentStatus !== "unbilled") return null;
+
+  var completionDate = fields.completionDate
+    ? _ymd(_toDate(fields.completionDate))
+    : "";
+  return {
+    paaguId: paaguId,
+    customerDesign: customerDesign,
+    loom: _masterUnbilledText(fields.loom).toUpperCase(),
+    producedMeters: _masterUnbilledNumber(fields.okMeters),
+    unbilledValue: _masterUnbilledNumber(fields.totalValue),
+    status: paymentStatus === "unbilled" ? "ready" : "running",
+    completionDate: completionDate
+  };
 }
 
-function _masterUnbilledProductionSortKey(row) {
-  var rowIndex = String(Number(row.rowIndex) || 0);
-  while (rowIndex.length < 7) rowIndex = "0" + rowIndex;
-  return String(row.date || "") + "|" + String(row.shift || "") + "|" + rowIndex;
-}
-
-function _masterUnbilledBillingLabel(record) {
-  if (!record) return "";
-  var customerDesign = _masterUnbilledText(record.customerName);
-  var party = _masterUnbilledText(record.party);
-  if (!customerDesign) return party;
-  if (!party) return customerDesign;
-  var normalizedCustomerDesign = _masterUnbilledKey(customerDesign);
-  var normalizedParty = _masterUnbilledKey(party);
-  if (normalizedCustomerDesign.indexOf(normalizedParty) >= 0) return customerDesign;
-  return party + " / " + customerDesign;
-}
-
-// Read billing by Paagu ID without requiring AP Party. The existing
-// receivables endpoint intentionally filters on Party and remains unchanged;
-// unbilled production needs every invoice that can be joined by Paagu ID.
-function _readMasterUnbilledBillingByPaagu() {
+function _readMasterUnbilledPaaguRows() {
   var context = _openMasterReceivablesContext();
-  var schema = _resolveMasterReceivablesSchema(context.sheet);
   var sh = context.sheet;
   var rawLastRow = sh.getLastRow();
   if (rawLastRow > MASTER_RECEIVABLES_MAX_GRID_ROWS) {
@@ -1614,158 +1651,55 @@ function _readMasterUnbilledBillingByPaagu() {
       { lastRow: rawLastRow, maxRows: MASTER_RECEIVABLES_MAX_GRID_ROWS }
     );
   }
-  if (rawLastRow < 2) return {};
+  if (rawLastRow < 2) return [];
 
-  // B (Paagu ID) is the authoritative join key and also bounds the meaningful
-  // rows. Display values ignore copied-down formulas that currently show blank.
-  var paaguValues = sh
-    .getRange(2, schema.columns.paaguId + 1, rawLastRow - 1, 1)
+  // C Customer/design bounds meaningful records and ignores the copied Paagu
+  // template rows below the active work.
+  var customerValues = sh
+    .getRange(2, 3, rawLastRow - 1, 1)
     .getDisplayValues();
-  var lastPaaguOffset = -1;
-  for (var p = 0; p < paaguValues.length; p++) {
-    if (_masterUnbilledText(paaguValues[p][0])) lastPaaguOffset = p;
+  var lastCustomerOffset = -1;
+  for (var p = 0; p < customerValues.length; p++) {
+    if (_masterUnbilledText(customerValues[p][0])) lastCustomerOffset = p;
   }
-  if (lastPaaguOffset < 0) return {};
+  if (lastCustomerOffset < 0) return [];
 
-  var dataRows = lastPaaguOffset + 1;
+  var dataRows = lastCustomerOffset + 1;
   if (dataRows > MASTER_RECEIVABLES_MAX_DATA_ROWS) {
     throw _masterReceivablesFailure(
       "SOURCE_DATA_TOO_LARGE",
-      "The master billing dataset exceeds the reviewed row bound.",
+      "The master unbilled dataset exceeds the reviewed row bound.",
       { meaningfulRows: dataRows, maxRows: MASTER_RECEIVABLES_MAX_DATA_ROWS }
     );
   }
 
-  var values = sh.getRange(2, 1, dataRows, 42).getValues(); // fixed A..AP source contract
-  var byPaagu = {};
-  for (var i = 0; i < values.length; i++) {
-    var r = values[i];
-    var rawPaaguId = r[schema.columns.paaguId];
-    var rawInvoiceAmount = r[schema.columns.invoiceAmount];
-    var rawInvoiceNumber = r[schema.columns.invoiceNumber];
-    if (
-      _masterSheetErrorCode(rawPaaguId) ||
-      _masterSheetErrorCode(rawInvoiceAmount) ||
-      _masterSheetErrorCode(rawInvoiceNumber)
-    ) {
-      throw _masterReceivablesFailure(
-        "MASTER_FORMULA_ERRORS",
-        "Required billing columns contain formula errors.",
-        { row: i + 2, fields: ["paaguId", "invoiceAmount", "invoiceNumber"] }
-      );
-    }
-
-    var paaguId = _masterUnbilledText(rawPaaguId);
-    var paaguKey = _masterUnbilledPaaguKey(paaguId);
-    if (!paaguKey) continue;
-    if (!byPaagu[paaguKey]) {
-      byPaagu[paaguKey] = {
-        customerName: "",
-        party: "",
-        invoices: {}
-      };
-    }
-    var record = byPaagu[paaguKey];
-    var customerName = _masterUnbilledText(r[schema.columns.customerName]);
-    var party = _masterUnbilledText(r[schema.columns.party]);
-    if (customerName && !_masterSheetErrorCode(customerName)) record.customerName = customerName;
-    if (party && !_masterSheetErrorCode(party)) record.party = party;
-
-    var invoiceNumber = _masterUnbilledText(rawInvoiceNumber);
-    if (!_hasRealInvoice(invoiceNumber)) continue;
-    var invoiceKey = _masterUnbilledInvoiceKey(invoiceNumber);
-    if (!invoiceKey) continue;
-    var invoiceAmount = Math.max(0, Number(rawInvoiceAmount) || 0);
-    // The workbook may repeat an invoice total on more than one row for the
-    // same Paagu ID. Count that invoice only once, retaining its largest
-    // populated value when copied rows are incomplete.
-    if (record.invoices[invoiceKey] === undefined || invoiceAmount > record.invoices[invoiceKey]) {
-      record.invoices[invoiceKey] = invoiceAmount;
+  var values = sh.getRange(2, 1, dataRows, 33).getValues(); // fixed A..AG source contract
+  // If a Paagu ID is repeated, any real invoice number marks every occurrence
+  // as billed. This prevents an older blank copy from leaking into Unbilled.
+  var billedPaagus = {};
+  for (var b = 0; b < values.length; b++) {
+    var billedPaaguKey = _masterUnbilledPaaguKey(values[b][1]);
+    if (billedPaaguKey && _hasRealInvoice(_masterUnbilledText(values[b][27]))) {
+      billedPaagus[billedPaaguKey] = true;
     }
   }
-  return byPaagu;
+  var out = [];
+  for (var i = 0; i < values.length; i++) {
+    var normalized = _masterUnbilledNormalizePaaguRow(values[i], i + 2, billedPaagus);
+    if (normalized) out.push(normalized);
+  }
+  return out;
 }
 
 function _buildMasterUnbilledReport(options) {
   options = options || {};
-  var productionRows = _readMasterRows({ fresh: options.fresh === true });
-  var billingByPaagu = _readMasterUnbilledBillingByPaagu();
-  var productionByPaagu = {};
-
-  for (var i = 0; i < productionRows.length; i++) {
-    var row = productionRows[i];
-    var paaguId = _masterUnbilledText(row.paaguId);
-    var paaguKey = _masterUnbilledPaaguKey(paaguId);
-    if (!paaguKey) continue;
-    if (!productionByPaagu[paaguKey]) {
-      productionByPaagu[paaguKey] = {
-        paaguId: paaguId,
-        producedMeters: 0,
-        productionValue: 0,
-        customerDesign: "",
-        customerDesignSortKey: "",
-        looms: {}
-      };
-    }
-    var production = productionByPaagu[paaguKey];
-    production.producedMeters += Number(row.meters) || 0;
-    production.productionValue += Number(row.revenue) || 0;
-
-    var sortKey = _masterUnbilledProductionSortKey(row);
-    var orderTag = _masterUnbilledText(row.orderTag);
-    if (orderTag && sortKey >= production.customerDesignSortKey) {
-      production.customerDesign = orderTag;
-      production.customerDesignSortKey = sortKey;
-    }
-
-    var loom = _masterUnbilledText(row.loom).toUpperCase();
-    if (!loom) continue;
-    if (!production.looms[loom]) {
-      production.looms[loom] = { latestSortKey: "", state: "", latestRunout: "" };
-    }
-    var loomState = production.looms[loom];
-    if (sortKey >= loomState.latestSortKey) {
-      loomState.latestSortKey = sortKey;
-      loomState.state = _masterUnbilledText(row.state);
-    }
-    if (_masterUnbilledIsRunout(row.state) && String(row.date || "") > loomState.latestRunout) {
-      loomState.latestRunout = String(row.date || "");
-    }
-  }
-
+  var paaguRows = _readMasterUnbilledPaaguRows();
   var grouped = {};
-  for (var key in productionByPaagu) {
-    if (!Object.prototype.hasOwnProperty.call(productionByPaagu, key)) continue;
-    var item = productionByPaagu[key];
-    var billing = billingByPaagu[key] || null;
-    // Invoice number is the authoritative billed signal. Once a real invoice
-    // exists for this Paagu ID, none of its production belongs in Unbilled.
-    // Placeholder text such as "invoice not created" is already excluded by
-    // _hasRealInvoice when the billing map is built.
-    if (billing && Object.keys(billing.invoices).length > 0) continue;
-
-    var estimatedUnbilled = Math.max(0, item.productionValue);
-    // Values below one rupee are rounding residue, not actionable unbilled work.
-    if (estimatedUnbilled < 1) continue;
-
-    var customerDesign = item.customerDesign || _masterUnbilledBillingLabel(billing) || item.paaguId;
+  for (var i = 0; i < paaguRows.length; i++) {
+    var item = paaguRows[i];
+    var customerDesign = item.customerDesign;
     var groupKey = _masterUnbilledKey(customerDesign);
     if (!groupKey) groupKey = _masterUnbilledKey(item.paaguId);
-
-    var loomNames = Object.keys(item.looms);
-    var allRunout = loomNames.length > 0;
-    var runningLooms = [];
-    var latestRunout = "";
-    for (var l = 0; l < loomNames.length; l++) {
-      var loomName = loomNames[l];
-      var state = item.looms[loomName];
-      if (!_masterUnbilledIsRunout(state.state)) {
-        allRunout = false;
-        runningLooms.push(loomName);
-      }
-      if (state.latestRunout > latestRunout) latestRunout = state.latestRunout;
-    }
-
     if (!grouped[groupKey]) {
       grouped[groupKey] = {
         key: groupKey,
@@ -1779,10 +1713,13 @@ function _buildMasterUnbilledReport(options) {
     }
     var group = grouped[groupKey];
     group.producedMeters += item.producedMeters;
-    group.estimatedUnbilled += estimatedUnbilled;
-    if (!allRunout) group.running = true;
-    if (latestRunout > group.latestRunout) group.latestRunout = latestRunout;
-    for (var rl = 0; rl < runningLooms.length; rl++) group.runningLooms[runningLooms[rl]] = true;
+    group.estimatedUnbilled += item.unbilledValue;
+    if (item.status === "running") {
+      group.running = true;
+      if (item.loom) group.runningLooms[item.loom] = true;
+    }
+    // For a multi-loom design, display the final/latest completed Paagu date.
+    if (item.completionDate > group.latestRunout) group.latestRunout = item.completionDate;
   }
 
   var rows = [];
@@ -1812,8 +1749,10 @@ function _buildMasterUnbilledReport(options) {
   }
 
   rows.sort(function (a, b) {
-    // Oldest final loom run-out first. Running production without any run-out
-    // date stays at the end; customer/design makes equal dates deterministic.
+    // Only a fully ready design has a final run-out date. Ready designs are
+    // oldest first; designs still running stay after them even when another
+    // loom under the same design has already completed.
+    if (a.status !== b.status) return a.status === "ready" ? -1 : 1;
     var aDate = String(a.latestRunout || "");
     var bDate = String(b.latestRunout || "");
     if (aDate && !bDate) return -1;

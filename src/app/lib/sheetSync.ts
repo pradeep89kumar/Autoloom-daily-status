@@ -745,7 +745,7 @@ function masterUnbilledRequest(
     fresh: options.fresh,
     select: (body) => body.unbilled,
     validate: isMasterUnbilledData,
-    cacheVersion: 2,
+    cacheVersion: 3,
     maxCacheAgeMs: DEFAULT_ROWS_CACHE_MS,
   };
 }

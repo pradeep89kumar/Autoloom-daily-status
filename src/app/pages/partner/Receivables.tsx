@@ -316,7 +316,7 @@ function UnbilledTable({ rows }: { rows: MasterUnbilledRow[] }) {
   return (
     <div className="overflow-hidden rounded-xl border border-[var(--color-border-hairline)] bg-white shadow-sm">
       <table className="w-full table-fixed border-collapse text-left">
-        <caption className="sr-only">Estimated unbilled production by customer and design</caption>
+        <caption className="sr-only">Unbilled production by customer and design</caption>
         <colgroup>
           <col className="w-[44%]" />
           <col className="w-[22%]" />
@@ -331,7 +331,7 @@ function UnbilledTable({ rows }: { rows: MasterUnbilledRow[] }) {
               Produced m
             </th>
             <th scope="col" className="px-2 py-2.5 text-right font-bold">
-              Est. unbilled
+              Unbilled value
             </th>
           </tr>
         </thead>
@@ -459,7 +459,7 @@ function UnbilledReceivablesView() {
             ) : (
               [
                 {
-                  label: "Total estimated",
+                  label: "Total unbilled",
                   value: data?.summary.totalEstimatedUnbilled || 0,
                   wide: true,
                 },
@@ -537,15 +537,15 @@ function UnbilledReceivablesView() {
               {filter === "ready"
                 ? "No production is ready to bill."
                 : filter === "running"
-                  ? "No running production has an estimated unbilled value."
-                  : "No estimated unbilled production is available."}
+                  ? "No running production is available."
+                  : "No unbilled production is available."}
             </p>
           ) : (
             <UnbilledTable rows={rows} />
           )}
 
           <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-[11px] leading-4 text-[var(--color-text-secondary)]">
-            Paagu IDs with an invoice number are excluded. Production values are shown before the 5% GST added to invoices. Meters shown are total produced meters.
+            Values use Total value and meters use OK mtr from Paagu ID. Rows with an invoice number are excluded. Invoice amounts include 5% GST.
           </p>
         </>
       )}
