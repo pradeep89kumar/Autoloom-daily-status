@@ -681,6 +681,84 @@ export async function fetchMasterReceivables(): Promise<ReceivableRow[]> {
   return result.rows;
 }
 
+export type MasterUnbilledStatus = "running" | "ready";
+
+export interface MasterUnbilledRow {
+  key: string;
+  customerDesign: string;
+  producedMeters: number;
+  estimatedUnbilled: number;
+  status: MasterUnbilledStatus;
+  latestRunout: string;
+  runningLooms: string[];
+}
+
+export interface MasterUnbilledData {
+  rows: MasterUnbilledRow[];
+  summary: {
+    totalEstimatedUnbilled: number;
+    readyToBillValue: number;
+    runningValue: number;
+  };
+  gstRate: number;
+}
+
+function isMasterUnbilledNumber(value: unknown): value is number {
+  return isSheetFiniteNumber(value) && value >= 0;
+}
+
+function isMasterUnbilledRow(value: unknown): value is MasterUnbilledRow {
+  return (
+    isSheetJsonRecord(value) &&
+    isSheetString(value.key) &&
+    isSheetString(value.customerDesign) &&
+    isMasterUnbilledNumber(value.producedMeters) &&
+    isMasterUnbilledNumber(value.estimatedUnbilled) &&
+    (value.status === "running" || value.status === "ready") &&
+    isSheetString(value.latestRunout) &&
+    isSheetArrayOf(value.runningLooms, isSheetString)
+  );
+}
+
+function isMasterUnbilledData(value: unknown): value is MasterUnbilledData {
+  if (
+    !isSheetJsonRecord(value) ||
+    !isSheetJsonRecord(value.summary) ||
+    !isSheetArrayOf(value.rows, isMasterUnbilledRow)
+  ) {
+    return false;
+  }
+  return (
+    isMasterUnbilledNumber(value.summary.totalEstimatedUnbilled) &&
+    isMasterUnbilledNumber(value.summary.readyToBillValue) &&
+    isMasterUnbilledNumber(value.summary.runningValue) &&
+    value.gstRate === 0.05
+  );
+}
+
+function masterUnbilledRequest(
+  options: { fresh?: boolean } = {},
+): SheetReadRequest<MasterUnbilledData> {
+  return {
+    key: `${PARTNER_CACHE_PREFIX}master-unbilled`,
+    params: { mode: "master-unbilled" },
+    fresh: options.fresh,
+    select: (body) => body.unbilled,
+    validate: isMasterUnbilledData,
+    maxCacheAgeMs: DEFAULT_ROWS_CACHE_MS,
+  };
+}
+
+export function peekMasterUnbilledCache(): SheetCacheSnapshot<MasterUnbilledData> | null {
+  return peekSheetCache(masterUnbilledRequest());
+}
+
+export function fetchMasterUnbilledResult(
+  options: { fresh?: boolean } = {},
+): Promise<SheetReadResult<MasterUnbilledData>> {
+  return readSheet(masterUnbilledRequest(options));
+}
+
 /* ------------------------------ design master (loom setup) ------------------------------ */
 
 export interface DesignWarpBand {

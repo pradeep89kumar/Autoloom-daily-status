@@ -16,6 +16,7 @@
  *  GET  ?mode=master-range&from=YYYY-MM-DD&to=YYYY-MM-DD → light per-loom-per-day aggregates
  *  GET  ?mode=master-orders                    → master Order tab rows
  *  GET  ?mode=master-receivables               → master Paagu ID receivables view
+ *  GET  ?mode=master-unbilled                  → estimated unbilled production by customer/design
  *  GET  ?mode=master-health                    → authenticated master workbook health
  *  POST kind:"master-health"                  → same health check with token in JSON body
  *  GET  ?mode=cashflow                         → cash position + monthly summary from Master Control tab
@@ -59,6 +60,9 @@ var MASTER_RECEIVABLES_MAX_PAGE_SIZE = 250;
 var MASTER_PRODUCTION_CACHE_VERSION = "master-production-v1";
 var MASTER_PRODUCTION_CACHE_TTL_SECONDS = 120;
 var MASTER_PRODUCTION_MAX_GRID_ROWS = 50000;
+var MASTER_UNBILLED_CACHE_VERSION = "master-unbilled-v1";
+var MASTER_UNBILLED_CACHE_TTL_SECONDS = 120;
+var MASTER_UNBILLED_GST_RATE = 0.05;
 var MASTER_RECEIVABLES_CACHE_LOCK_WAIT_MS = 24000;
 var MASTER_RECEIVABLES_MAX_WAIT_BEFORE_BUILD_MS = 2000;
 
@@ -109,7 +113,7 @@ var CF_COL_IOB_CA     = CF_COL_IOB_CA_CREDIT;
 var CF_COL_CASHBOOK   = CF_COL_CASHBOOK_CREDIT;
 var CF_COL_CASH       = CF_COL_CASH_CREDIT;
 var CF_COL_IOB_CC     = CF_COL_IOB_CC_DRAWN;
-var CF_IOB_CC_LIMIT   = 2000000;
+var CF_IOB_CC_LIMIT   = 3000000;
 
 // Monthly summary cells (per Master Control sheet layout).
 var CF_CELL_OP_INFLOW   = "R3";   // Operating Inflow (positive)
@@ -271,6 +275,11 @@ function doGet(e) {
   }
   if (mode === "master-receivables") {
     return _json(_masterReceivablesResponse(e));
+  }
+  if (mode === "master-unbilled") {
+    return _json(_masterReadResponse("master-unbilled", function () {
+      return _masterUnbilledResponse(e);
+    }));
   }
   if (mode === "master-health") {
     return _json(_masterWorkbookHealthResponse(e));
@@ -1491,6 +1500,372 @@ function _readMasterRange(fromYmd, toYmd, options) {
     });
   }
   return out;
+}
+
+/* ----------------------- unbilled production (Partner) ----------------------- */
+
+function _masterUnbilledCacheKey() {
+  return [
+    "mu",
+    MASTER_UNBILLED_CACHE_VERSION,
+    MASTER_SHEET_ID,
+    MASTER_PRODUCTION_TAB,
+    MASTER_PAAGU_TAB
+  ].join(":");
+}
+
+function _readMasterUnbilledCache() {
+  try {
+    var text = CacheService.getScriptCache().get(_masterUnbilledCacheKey());
+    if (!text) return null;
+    var cached = JSON.parse(text);
+    if (
+      !cached ||
+      !cached.unbilled ||
+      !Array.isArray(cached.unbilled.rows) ||
+      !cached.unbilled.summary ||
+      cached.unbilled.gstRate !== MASTER_UNBILLED_GST_RATE ||
+      !cached.generatedAt
+    ) {
+      return null;
+    }
+    return cached;
+  } catch (err) {
+    return null;
+  }
+}
+
+function _writeMasterUnbilledCache(value) {
+  try {
+    var text = JSON.stringify(value);
+    // Apps Script cache entries are limited to 100 KB. Leave headroom for
+    // UTF-8 expansion and fail harmlessly when a future report grows larger.
+    if (_masterReceivablesUtf8Bytes(text) > 90000) return false;
+    CacheService.getScriptCache().put(
+      _masterUnbilledCacheKey(),
+      text,
+      MASTER_UNBILLED_CACHE_TTL_SECONDS
+    );
+    return true;
+  } catch (err) {
+    _masterReceivablesLog({ event: "master-unbilled-cache", ok: false, code: "CACHE_WRITE_FAILED" });
+    return false;
+  }
+}
+
+function _masterUnbilledRound(value) {
+  var number = Number(value) || 0;
+  return Math.round(Math.max(0, number) * 100) / 100;
+}
+
+function _masterUnbilledText(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function _masterUnbilledKey(value) {
+  return _masterUnbilledText(value).toLowerCase();
+}
+
+function _masterUnbilledPaaguKey(value) {
+  return _masterUnbilledText(value).toUpperCase();
+}
+
+function _masterUnbilledInvoiceKey(value) {
+  // Preserve meaningful separators inside an invoice ID. Only surrounding
+  // whitespace/case and repeated whitespace are normalized for de-duplication.
+  return _masterUnbilledText(value).toUpperCase();
+}
+
+function _masterUnbilledIsRunout(value) {
+  var state = String(value || "").toUpperCase().replace(/[^A-Z]/g, "");
+  return state === "RUNOUT" || state === "COMPLETED" || state === "COMPLITED";
+}
+
+function _masterUnbilledProductionSortKey(row) {
+  var rowIndex = String(Number(row.rowIndex) || 0);
+  while (rowIndex.length < 7) rowIndex = "0" + rowIndex;
+  return String(row.date || "") + "|" + String(row.shift || "") + "|" + rowIndex;
+}
+
+function _masterUnbilledBillingLabel(record) {
+  if (!record) return "";
+  var customerDesign = _masterUnbilledText(record.customerName);
+  var party = _masterUnbilledText(record.party);
+  if (!customerDesign) return party;
+  if (!party) return customerDesign;
+  var normalizedCustomerDesign = _masterUnbilledKey(customerDesign);
+  var normalizedParty = _masterUnbilledKey(party);
+  if (normalizedCustomerDesign.indexOf(normalizedParty) >= 0) return customerDesign;
+  return party + " / " + customerDesign;
+}
+
+// Read billing by Paagu ID without requiring AP Party. The existing
+// receivables endpoint intentionally filters on Party and remains unchanged;
+// unbilled production needs every invoice that can be joined by Paagu ID.
+function _readMasterUnbilledBillingByPaagu() {
+  var context = _openMasterReceivablesContext();
+  var schema = _resolveMasterReceivablesSchema(context.sheet);
+  var sh = context.sheet;
+  var rawLastRow = sh.getLastRow();
+  if (rawLastRow > MASTER_RECEIVABLES_MAX_GRID_ROWS) {
+    throw _masterReceivablesFailure(
+      "SOURCE_GRID_TOO_LARGE",
+      "The master billing sheet exceeds the reviewed row bound.",
+      { lastRow: rawLastRow, maxRows: MASTER_RECEIVABLES_MAX_GRID_ROWS }
+    );
+  }
+  if (rawLastRow < 2) return {};
+
+  // B (Paagu ID) is the authoritative join key and also bounds the meaningful
+  // rows. Display values ignore copied-down formulas that currently show blank.
+  var paaguValues = sh
+    .getRange(2, schema.columns.paaguId + 1, rawLastRow - 1, 1)
+    .getDisplayValues();
+  var lastPaaguOffset = -1;
+  for (var p = 0; p < paaguValues.length; p++) {
+    if (_masterUnbilledText(paaguValues[p][0])) lastPaaguOffset = p;
+  }
+  if (lastPaaguOffset < 0) return {};
+
+  var dataRows = lastPaaguOffset + 1;
+  if (dataRows > MASTER_RECEIVABLES_MAX_DATA_ROWS) {
+    throw _masterReceivablesFailure(
+      "SOURCE_DATA_TOO_LARGE",
+      "The master billing dataset exceeds the reviewed row bound.",
+      { meaningfulRows: dataRows, maxRows: MASTER_RECEIVABLES_MAX_DATA_ROWS }
+    );
+  }
+
+  var values = sh.getRange(2, 1, dataRows, 42).getValues(); // fixed A..AP source contract
+  var byPaagu = {};
+  for (var i = 0; i < values.length; i++) {
+    var r = values[i];
+    var rawPaaguId = r[schema.columns.paaguId];
+    var rawInvoiceAmount = r[schema.columns.invoiceAmount];
+    var rawInvoiceNumber = r[schema.columns.invoiceNumber];
+    if (
+      _masterSheetErrorCode(rawPaaguId) ||
+      _masterSheetErrorCode(rawInvoiceAmount) ||
+      _masterSheetErrorCode(rawInvoiceNumber)
+    ) {
+      throw _masterReceivablesFailure(
+        "MASTER_FORMULA_ERRORS",
+        "Required billing columns contain formula errors.",
+        { row: i + 2, fields: ["paaguId", "invoiceAmount", "invoiceNumber"] }
+      );
+    }
+
+    var paaguId = _masterUnbilledText(rawPaaguId);
+    var paaguKey = _masterUnbilledPaaguKey(paaguId);
+    if (!paaguKey) continue;
+    if (!byPaagu[paaguKey]) {
+      byPaagu[paaguKey] = {
+        customerName: "",
+        party: "",
+        invoices: {}
+      };
+    }
+    var record = byPaagu[paaguKey];
+    var customerName = _masterUnbilledText(r[schema.columns.customerName]);
+    var party = _masterUnbilledText(r[schema.columns.party]);
+    if (customerName && !_masterSheetErrorCode(customerName)) record.customerName = customerName;
+    if (party && !_masterSheetErrorCode(party)) record.party = party;
+
+    var invoiceNumber = _masterUnbilledText(rawInvoiceNumber);
+    if (!_hasRealInvoice(invoiceNumber)) continue;
+    var invoiceKey = _masterUnbilledInvoiceKey(invoiceNumber);
+    if (!invoiceKey) continue;
+    var invoiceAmount = Math.max(0, Number(rawInvoiceAmount) || 0);
+    // The workbook may repeat an invoice total on more than one row for the
+    // same Paagu ID. Count that invoice only once, retaining its largest
+    // populated value when copied rows are incomplete.
+    if (record.invoices[invoiceKey] === undefined || invoiceAmount > record.invoices[invoiceKey]) {
+      record.invoices[invoiceKey] = invoiceAmount;
+    }
+  }
+  return byPaagu;
+}
+
+function _buildMasterUnbilledReport(options) {
+  options = options || {};
+  var productionRows = _readMasterRows({ fresh: options.fresh === true });
+  var billingByPaagu = _readMasterUnbilledBillingByPaagu();
+  var productionByPaagu = {};
+
+  for (var i = 0; i < productionRows.length; i++) {
+    var row = productionRows[i];
+    var paaguId = _masterUnbilledText(row.paaguId);
+    var paaguKey = _masterUnbilledPaaguKey(paaguId);
+    if (!paaguKey) continue;
+    if (!productionByPaagu[paaguKey]) {
+      productionByPaagu[paaguKey] = {
+        paaguId: paaguId,
+        producedMeters: 0,
+        productionValue: 0,
+        customerDesign: "",
+        customerDesignSortKey: "",
+        looms: {}
+      };
+    }
+    var production = productionByPaagu[paaguKey];
+    production.producedMeters += Number(row.meters) || 0;
+    production.productionValue += Number(row.revenue) || 0;
+
+    var sortKey = _masterUnbilledProductionSortKey(row);
+    var orderTag = _masterUnbilledText(row.orderTag);
+    if (orderTag && sortKey >= production.customerDesignSortKey) {
+      production.customerDesign = orderTag;
+      production.customerDesignSortKey = sortKey;
+    }
+
+    var loom = _masterUnbilledText(row.loom).toUpperCase();
+    if (!loom) continue;
+    if (!production.looms[loom]) {
+      production.looms[loom] = { latestSortKey: "", state: "", latestRunout: "" };
+    }
+    var loomState = production.looms[loom];
+    if (sortKey >= loomState.latestSortKey) {
+      loomState.latestSortKey = sortKey;
+      loomState.state = _masterUnbilledText(row.state);
+    }
+    if (_masterUnbilledIsRunout(row.state) && String(row.date || "") > loomState.latestRunout) {
+      loomState.latestRunout = String(row.date || "");
+    }
+  }
+
+  var grouped = {};
+  for (var key in productionByPaagu) {
+    if (!Object.prototype.hasOwnProperty.call(productionByPaagu, key)) continue;
+    var item = productionByPaagu[key];
+    var billing = billingByPaagu[key] || null;
+    var grossBilled = 0;
+    if (billing) {
+      for (var invoiceKey in billing.invoices) {
+        if (Object.prototype.hasOwnProperty.call(billing.invoices, invoiceKey)) {
+          grossBilled += Number(billing.invoices[invoiceKey]) || 0;
+        }
+      }
+    }
+    var billedPreGst = grossBilled / (1 + MASTER_UNBILLED_GST_RATE);
+    var estimatedUnbilled = Math.max(0, item.productionValue - billedPreGst);
+    // Values below one rupee are rounding residue, not actionable unbilled work.
+    if (estimatedUnbilled < 1) continue;
+
+    var customerDesign = item.customerDesign || _masterUnbilledBillingLabel(billing) || item.paaguId;
+    var groupKey = _masterUnbilledKey(customerDesign);
+    if (!groupKey) groupKey = _masterUnbilledKey(item.paaguId);
+
+    var loomNames = Object.keys(item.looms);
+    var allRunout = loomNames.length > 0;
+    var runningLooms = [];
+    var latestRunout = "";
+    for (var l = 0; l < loomNames.length; l++) {
+      var loomName = loomNames[l];
+      var state = item.looms[loomName];
+      if (!_masterUnbilledIsRunout(state.state)) {
+        allRunout = false;
+        runningLooms.push(loomName);
+      }
+      if (state.latestRunout > latestRunout) latestRunout = state.latestRunout;
+    }
+
+    if (!grouped[groupKey]) {
+      grouped[groupKey] = {
+        key: groupKey,
+        customerDesign: customerDesign,
+        producedMeters: 0,
+        estimatedUnbilled: 0,
+        running: false,
+        latestRunout: "",
+        runningLooms: {}
+      };
+    }
+    var group = grouped[groupKey];
+    group.producedMeters += item.producedMeters;
+    group.estimatedUnbilled += estimatedUnbilled;
+    if (!allRunout) group.running = true;
+    if (latestRunout > group.latestRunout) group.latestRunout = latestRunout;
+    for (var rl = 0; rl < runningLooms.length; rl++) group.runningLooms[runningLooms[rl]] = true;
+  }
+
+  var rows = [];
+  var summary = {
+    totalEstimatedUnbilled: 0,
+    readyToBillValue: 0,
+    runningValue: 0
+  };
+  for (var groupKeyValue in grouped) {
+    if (!Object.prototype.hasOwnProperty.call(grouped, groupKeyValue)) continue;
+    var groupedItem = grouped[groupKeyValue];
+    var amount = _masterUnbilledRound(groupedItem.estimatedUnbilled);
+    var status = groupedItem.running ? "running" : "ready";
+    var groupedRunningLooms = Object.keys(groupedItem.runningLooms).sort();
+    rows.push({
+      key: groupedItem.key,
+      customerDesign: groupedItem.customerDesign,
+      producedMeters: _masterUnbilledRound(groupedItem.producedMeters),
+      estimatedUnbilled: amount,
+      status: status,
+      latestRunout: groupedItem.latestRunout,
+      runningLooms: groupedRunningLooms
+    });
+    summary.totalEstimatedUnbilled += amount;
+    if (status === "ready") summary.readyToBillValue += amount;
+    else summary.runningValue += amount;
+  }
+
+  rows.sort(function (a, b) {
+    if (a.status !== b.status) return a.status === "ready" ? -1 : 1;
+    var aName = a.customerDesign.toLowerCase();
+    var bName = b.customerDesign.toLowerCase();
+    return aName < bName ? -1 : aName > bName ? 1 : 0;
+  });
+  summary.totalEstimatedUnbilled = _masterUnbilledRound(summary.totalEstimatedUnbilled);
+  summary.readyToBillValue = _masterUnbilledRound(summary.readyToBillValue);
+  summary.runningValue = _masterUnbilledRound(summary.runningValue);
+
+  return {
+    rows: rows,
+    summary: summary,
+    gstRate: MASTER_UNBILLED_GST_RATE
+  };
+}
+
+function _masterUnbilledResponse(e) {
+  var fresh = _masterFreshRequested(e);
+  if (!fresh) {
+    var cached = _readMasterUnbilledCache();
+    if (cached) {
+      return {
+        ok: true,
+        unbilled: cached.unbilled,
+        meta: {
+          schemaVersion: MASTER_UNBILLED_CACHE_VERSION,
+          generatedAt: cached.generatedAt,
+          servedAt: new Date().toISOString(),
+          cache: { status: "hit", ttlSeconds: MASTER_UNBILLED_CACHE_TTL_SECONDS }
+        }
+      };
+    }
+  }
+
+  var unbilled = _buildMasterUnbilledReport({ fresh: fresh });
+  var generatedAt = new Date().toISOString();
+  var stored = _writeMasterUnbilledCache({ unbilled: unbilled, generatedAt: generatedAt });
+  return {
+    ok: true,
+    unbilled: unbilled,
+    meta: {
+      schemaVersion: MASTER_UNBILLED_CACHE_VERSION,
+      generatedAt: generatedAt,
+      servedAt: new Date().toISOString(),
+      cache: {
+        status: fresh ? "refresh" : "miss",
+        stored: stored,
+        ttlSeconds: stored ? MASTER_UNBILLED_CACHE_TTL_SECONDS : 0
+      }
+    }
+  };
 }
 
 function _readMasterOrders() {

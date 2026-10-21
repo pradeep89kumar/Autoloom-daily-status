@@ -29,6 +29,7 @@ const PARTNER_GET_PARAMS: Record<string, readonly string[]> = {
   "master-range": ["from", "to", "fresh"],
   "master-orders": [],
   "master-receivables": ["fresh"],
+  "master-unbilled": ["fresh"],
   cashflow: [],
   "cashflow-ledger": ["from", "to", "account", "direction"],
   "cashflow-report": ["from", "to", "account", "direction"],
@@ -101,6 +102,43 @@ function isCompatibleCashflowReportBody(body: Record<string, unknown>): boolean 
   return isJsonRecord(body.report.cashflow) && Array.isArray(body.report.rows);
 }
 
+function isFiniteNonNegativeNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+function isCompatibleMasterUnbilledBody(body: Record<string, unknown>): boolean {
+  // Unknown modes on an older Apps Script deployment fall through to the
+  // supervisor light-row response. Require the dedicated Partner envelope so
+  // that payload can never be mistaken for (or exposed as) an unbilled report.
+  if (body.ok !== true) return true;
+  if (!isJsonRecord(body.unbilled)) return false;
+  const report = body.unbilled;
+  if (!Array.isArray(report.rows) || !isJsonRecord(report.summary) || report.gstRate !== 0.05) {
+    return false;
+  }
+  const summary = report.summary;
+  if (
+    !isFiniteNonNegativeNumber(summary.totalEstimatedUnbilled) ||
+    !isFiniteNonNegativeNumber(summary.readyToBillValue) ||
+    !isFiniteNonNegativeNumber(summary.runningValue)
+  ) {
+    return false;
+  }
+  return report.rows.every((value) => {
+    if (!isJsonRecord(value)) return false;
+    return (
+      typeof value.key === "string" &&
+      typeof value.customerDesign === "string" &&
+      isFiniteNonNegativeNumber(value.producedMeters) &&
+      isFiniteNonNegativeNumber(value.estimatedUnbilled) &&
+      (value.status === "running" || value.status === "ready") &&
+      typeof value.latestRunout === "string" &&
+      Array.isArray(value.runningLooms) &&
+      value.runningLooms.every((loom) => typeof loom === "string")
+    );
+  });
+}
+
 async function upstreamFetch(
   url: URL,
   init: RequestInit,
@@ -156,6 +194,9 @@ async function proxyGet(request: Request, role: AppRole, config: { url: URL; tok
       return jsonResponse({ ok: false, error: "upstream_auth_failed" }, 502);
     }
     if (mode === "cashflow-report" && !isCompatibleCashflowReportBody(body)) {
+      return jsonResponse({ ok: false, error: "upstream_incompatible_response" }, 409);
+    }
+    if (mode === "master-unbilled" && !isCompatibleMasterUnbilledBody(body)) {
       return jsonResponse({ ok: false, error: "upstream_incompatible_response" }, 409);
     }
     return jsonResponse(body);

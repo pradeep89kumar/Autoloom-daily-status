@@ -1,11 +1,23 @@
 import { useMemo, useState } from "react";
-import { CaretDown, CaretUp, FilePdf, MagnifyingGlass, X } from "@phosphor-icons/react";
+import {
+  ArrowClockwise,
+  CaretDown,
+  CaretUp,
+  FilePdf,
+  MagnifyingGlass,
+  WarningCircle,
+  X,
+} from "@phosphor-icons/react";
 import { useNavigate } from "react-router";
 import { SheetDataStatus } from "../../components/SheetDataStatus";
 import { useSheetResource } from "../../hooks/useSheetResource";
 import {
   fetchMasterReceivablesResult,
+  fetchMasterUnbilledResult,
   peekMasterReceivablesCache,
+  peekMasterUnbilledCache,
+  type MasterUnbilledData,
+  type MasterUnbilledRow,
   type ReceivableRow,
   type SheetReadResult,
 } from "../../lib/sheetSync";
@@ -27,10 +39,11 @@ import {
   type ReceivableStatusKind as StatusKind,
 } from "../../lib/receivables";
 
-type ReceivablesView = "party" | "invoice";
+type ReceivablesView = "party" | "invoice" | "unbilled";
 type InvoiceMode = "outstanding" | "paid";
 type InvoiceFilter = "pending" | "overdue" | "partial";
 type InvoiceSortDirection = "desc" | "asc";
+type UnbilledFilter = "all" | "running" | "ready";
 
 async function loadReceivablesResult(
   { fresh }: { fresh: boolean },
@@ -45,6 +58,12 @@ async function loadReceivablesResult(
     stale: result.stale,
     warning: result.warning,
   };
+}
+
+function loadMasterUnbilledResult(
+  { fresh }: { fresh: boolean },
+): Promise<SheetReadResult<MasterUnbilledData>> {
+  return fetchMasterUnbilledResult({ fresh });
 }
 
 const invoiceNumberCollator = new Intl.Collator("en", {
@@ -289,6 +308,251 @@ function InvoiceLedgerTable({ rows }: { rows: ReceivableRow[] }) {
   );
 }
 
+const metersFormatter = new Intl.NumberFormat("en-IN", {
+  maximumFractionDigits: 1,
+});
+
+function UnbilledTable({ rows }: { rows: MasterUnbilledRow[] }) {
+  return (
+    <div className="overflow-hidden rounded-xl border border-[var(--color-border-hairline)] bg-white shadow-sm">
+      <table className="w-full table-fixed border-collapse text-left">
+        <caption className="sr-only">Estimated unbilled production by customer and design</caption>
+        <colgroup>
+          <col className="w-[44%]" />
+          <col className="w-[22%]" />
+          <col className="w-[34%]" />
+        </colgroup>
+        <thead className="border-b border-[var(--color-border-hairline)] bg-slate-50 text-[10px] uppercase leading-3 tracking-wide text-[var(--color-text-secondary)]">
+          <tr>
+            <th scope="col" className="px-2 py-2.5 font-bold">
+              Customer / design
+            </th>
+            <th scope="col" className="px-2 py-2.5 text-right font-bold">
+              Produced m
+            </th>
+            <th scope="col" className="px-2 py-2.5 text-right font-bold">
+              Est. unbilled
+            </th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-[var(--color-border-hairline)]">
+          {rows.map((row) => {
+            const runningLooms = row.runningLooms.map(fmtLoom).filter(Boolean);
+            return (
+              <tr key={row.key} className="align-top">
+                <td className="px-2 py-3">
+                  <p className="break-words text-[12px] font-semibold leading-4 text-[var(--color-text-primary)]">
+                    {row.customerDesign || "—"}
+                  </p>
+                  <div className="mt-1 flex flex-wrap items-center gap-1">
+                    <span
+                      className={`inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+                        row.status === "ready"
+                          ? "bg-blue-50 text-blue-700"
+                          : "bg-emerald-100 text-emerald-700"
+                      }`}
+                    >
+                      {row.status === "ready" ? "Ready to bill" : "Running"}
+                    </span>
+                    <span className="text-[10px] leading-4 text-[var(--color-text-secondary)]">
+                      {row.status === "ready"
+                        ? row.latestRunout
+                          ? `Last run-out ${fmtDate(row.latestRunout)}`
+                          : "Run-out date unavailable"
+                        : runningLooms.length > 0
+                          ? `Running ${runningLooms.join(", ")}${
+                              row.latestRunout
+                                ? ` · Last run-out ${fmtDate(row.latestRunout)}`
+                                : ""
+                            }`
+                          : row.latestRunout
+                            ? `Production active · Last run-out ${fmtDate(row.latestRunout)}`
+                            : "Production active"}
+                    </span>
+                  </div>
+                </td>
+                <td className="px-2 py-3 text-right text-[12px] font-semibold tabular-nums text-[var(--color-text-primary)]">
+                  {metersFormatter.format(row.producedMeters)}
+                </td>
+                <td className="px-2 py-3 text-right text-[12px] font-bold tabular-nums text-[var(--color-text-primary)]">
+                  {fmtRupees(row.estimatedUnbilled)}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Mounted only after the Unbilled tab is selected, so existing views do not wait for this request. */
+function UnbilledReceivablesView() {
+  const [filter, setFilter] = useState<UnbilledFilter>("ready");
+  const resource = useSheetResource<MasterUnbilledData>({
+    resourceKey: "partner:master-unbilled",
+    load: loadMasterUnbilledResult,
+    peek: peekMasterUnbilledCache,
+  });
+  const data = resource.data;
+  const rows = useMemo(() => {
+    if (!data) return [];
+    if (filter === "all") return data.rows;
+    return data.rows.filter((row) => row.status === filter);
+  }, [data, filter]);
+  const backendUpdateNeeded =
+    !data && resource.error?.code === "upstream_incompatible_response";
+
+  return (
+    <>
+      {backendUpdateNeeded ? (
+        <div
+          className="mb-3 flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-amber-950"
+          role="alert"
+        >
+          <WarningCircle className="mt-0.5 h-4 w-4 shrink-0" weight="fill" />
+          <div className="min-w-0 flex-1">
+            <p className="text-[13px] font-semibold">Unbilled data update is not live yet</p>
+            <p className="mt-0.5 text-[12px] leading-relaxed opacity-80">
+              Update the approved Apps Script deployment, then retry. Existing receivables remain available.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={resource.refresh}
+            disabled={resource.refreshing}
+            className="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border border-current/20 bg-white/70 px-2 text-[12px] font-semibold disabled:opacity-60"
+          >
+            <ArrowClockwise
+              className={`h-3.5 w-3.5 ${resource.refreshing ? "animate-spin" : ""}`}
+              weight="bold"
+            />
+            Retry
+          </button>
+        </div>
+      ) : (
+        <SheetDataStatus
+          error={resource.error}
+          warning={resource.warning}
+          refreshing={resource.refreshing}
+          lastSyncedAt={resource.lastSyncedAt}
+          onRetry={resource.refresh}
+          className="mb-3"
+        />
+      )}
+
+      {(resource.loading || data) && (
+        <>
+          <div className="mb-3 grid grid-cols-2 gap-2">
+            {resource.loading && !data ? (
+              [0, 1, 2].map((item) => (
+                <div
+                  key={item}
+                  className={`min-h-[76px] rounded-xl border border-[var(--color-border-hairline)] bg-white p-3 ${
+                    item === 0 ? "col-span-2" : ""
+                  }`}
+                >
+                  <div className="h-3 w-16 animate-pulse rounded bg-black/[0.05]" />
+                  <div className="mt-2 h-5 w-20 animate-pulse rounded bg-black/[0.07]" />
+                </div>
+              ))
+            ) : (
+              [
+                {
+                  label: "Total estimated",
+                  value: data?.summary.totalEstimatedUnbilled || 0,
+                  wide: true,
+                },
+                {
+                  label: "Ready to bill",
+                  value: data?.summary.readyToBillValue || 0,
+                  wide: false,
+                },
+                {
+                  label: "Running",
+                  value: data?.summary.runningValue || 0,
+                  wide: false,
+                },
+              ].map((item) => (
+                <div
+                  key={item.label}
+                  className={`min-w-0 rounded-xl border border-[var(--color-border-hairline)] bg-white p-3 ${
+                    item.wide ? "col-span-2" : ""
+                  }`}
+                >
+                  <p className="text-[10px] font-semibold uppercase leading-3 tracking-wide text-[var(--color-text-secondary)]">
+                    {item.label}
+                  </p>
+                  <p className="mt-1 break-words text-[15px] font-bold leading-5 tabular-nums text-[var(--color-text-primary)]">
+                    {fmtRupees(item.value)}
+                  </p>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div
+            role="group"
+            aria-label="Unbilled production filter"
+            className="mb-3 flex gap-2 overflow-x-auto -mx-1 px-1"
+          >
+            {(
+              [
+                { key: "all", label: "All" },
+                { key: "running", label: "Running" },
+                { key: "ready", label: "Ready to bill" },
+              ] as { key: UnbilledFilter; label: string }[]
+            ).map((option) => (
+              <button
+                key={option.key}
+                type="button"
+                aria-pressed={filter === option.key}
+                onClick={() => setFilter(option.key)}
+                className={`min-h-11 whitespace-nowrap rounded-full border px-3 py-1.5 text-[13px] font-medium ${
+                  filter === option.key
+                    ? "border-[var(--color-text-primary)] bg-[var(--color-text-primary)] text-white"
+                    : "border-[var(--color-border-hairline)] bg-white text-[var(--color-text-secondary)]"
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+
+          {resource.loading && !data ? (
+            <div className="overflow-hidden rounded-xl border border-[var(--color-border-hairline)] bg-white">
+              {[0, 1, 2, 3].map((item) => (
+                <div
+                  key={item}
+                  className="grid grid-cols-3 gap-3 border-b border-[var(--color-border-hairline)] px-3 py-4 last:border-b-0"
+                >
+                  <div className="h-4 animate-pulse rounded bg-black/[0.06]" />
+                  <div className="h-4 animate-pulse rounded bg-black/[0.05]" />
+                  <div className="h-4 animate-pulse rounded bg-black/[0.06]" />
+                </div>
+              ))}
+            </div>
+          ) : rows.length === 0 ? (
+            <p className="text-[15px] italic text-[var(--color-text-secondary)]">
+              {filter === "ready"
+                ? "No production is ready to bill."
+                : filter === "running"
+                  ? "No running production has an estimated unbilled value."
+                  : "No estimated unbilled production is available."}
+            </p>
+          ) : (
+            <UnbilledTable rows={rows} />
+          )}
+
+          <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-[11px] leading-4 text-[var(--color-text-secondary)]">
+            Estimated unbilled values are based on production value after adjusting GST-inclusive invoices to their pre-GST value at 5%. Meters shown are total produced meters.
+          </p>
+        </>
+      )}
+    </>
+  );
+}
+
 export function PartnerReceivables() {
   const navigate = useNavigate();
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -373,28 +637,33 @@ export function PartnerReceivables() {
           <p className="text-[14px] text-[var(--color-text-secondary)] mt-0.5">
             {view === "party"
               ? "Party-wise pending against raised invoices."
-              : "Invoice ledger across outstanding and paid history."}
+              : view === "invoice"
+                ? "Invoice ledger across outstanding and paid history."
+                : "Estimated production value not yet invoiced."}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => navigate("/partner/receivables/report")}
-          className="shrink-0 inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[13px] font-semibold text-blue-700 transition-colors hover:bg-blue-100"
-        >
-          <FilePdf className="h-4 w-4" weight="bold" />
-          Generate report
-        </button>
+        {view !== "unbilled" && (
+          <button
+            type="button"
+            onClick={() => navigate("/partner/receivables/report")}
+            className="shrink-0 inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[13px] font-semibold text-blue-700 transition-colors hover:bg-blue-100"
+          >
+            <FilePdf className="h-4 w-4" weight="bold" />
+            Generate report
+          </button>
+        )}
       </div>
 
       <div
         role="group"
         aria-label="Receivables view"
-        className="mb-3 grid grid-cols-2 rounded-xl border border-[var(--color-border-hairline)] bg-slate-50 p-1"
+        className="mb-3 grid grid-cols-3 rounded-xl border border-[var(--color-border-hairline)] bg-slate-50 p-1"
       >
         {(
           [
             { key: "party", label: "Party view" },
             { key: "invoice", label: "Invoice view" },
+            { key: "unbilled", label: "Unbilled" },
           ] as { key: ReceivablesView; label: string }[]
         ).map((option) => (
           <button
@@ -413,16 +682,20 @@ export function PartnerReceivables() {
         ))}
       </div>
 
-      <SheetDataStatus
-        error={receivablesResource.error}
-        warning={receivablesResource.warning}
-        refreshing={receivablesResource.refreshing}
-        lastSyncedAt={receivablesResource.lastSyncedAt}
-        onRetry={receivablesResource.refresh}
-        className="mb-3"
-      />
+      {view !== "unbilled" && (
+        <SheetDataStatus
+          error={receivablesResource.error}
+          warning={receivablesResource.warning}
+          refreshing={receivablesResource.refreshing}
+          lastSyncedAt={receivablesResource.lastSyncedAt}
+          onRetry={receivablesResource.refresh}
+          className="mb-3"
+        />
+      )}
 
-      {loading || rows !== null ? (view === "party" ? (
+      {view === "unbilled" ? (
+        <UnbilledReceivablesView />
+      ) : loading || rows !== null ? (view === "party" ? (
         <>
 
       <div className="mb-3 flex gap-2 overflow-x-auto -mx-1 px-1">
