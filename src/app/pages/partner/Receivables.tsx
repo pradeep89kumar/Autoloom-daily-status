@@ -545,7 +545,7 @@ function UnbilledReceivablesView() {
           )}
 
           <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-[11px] leading-4 text-[var(--color-text-secondary)]">
-            Estimated unbilled values are based on production value after adjusting GST-inclusive invoices to their pre-GST value at 5%. Meters shown are total produced meters.
+            Paagu IDs with an invoice number are excluded. Production values are shown before the 5% GST added to invoices. Meters shown are total produced meters.
           </p>
         </>
       )}

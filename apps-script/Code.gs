@@ -60,7 +60,7 @@ var MASTER_RECEIVABLES_MAX_PAGE_SIZE = 250;
 var MASTER_PRODUCTION_CACHE_VERSION = "master-production-v1";
 var MASTER_PRODUCTION_CACHE_TTL_SECONDS = 120;
 var MASTER_PRODUCTION_MAX_GRID_ROWS = 50000;
-var MASTER_UNBILLED_CACHE_VERSION = "master-unbilled-v1";
+var MASTER_UNBILLED_CACHE_VERSION = "master-unbilled-v2";
 var MASTER_UNBILLED_CACHE_TTL_SECONDS = 120;
 var MASTER_UNBILLED_GST_RATE = 0.05;
 var MASTER_RECEIVABLES_CACHE_LOCK_WAIT_MS = 24000;
@@ -1738,16 +1738,13 @@ function _buildMasterUnbilledReport(options) {
     if (!Object.prototype.hasOwnProperty.call(productionByPaagu, key)) continue;
     var item = productionByPaagu[key];
     var billing = billingByPaagu[key] || null;
-    var grossBilled = 0;
-    if (billing) {
-      for (var invoiceKey in billing.invoices) {
-        if (Object.prototype.hasOwnProperty.call(billing.invoices, invoiceKey)) {
-          grossBilled += Number(billing.invoices[invoiceKey]) || 0;
-        }
-      }
-    }
-    var billedPreGst = grossBilled / (1 + MASTER_UNBILLED_GST_RATE);
-    var estimatedUnbilled = Math.max(0, item.productionValue - billedPreGst);
+    // Invoice number is the authoritative billed signal. Once a real invoice
+    // exists for this Paagu ID, none of its production belongs in Unbilled.
+    // Placeholder text such as "invoice not created" is already excluded by
+    // _hasRealInvoice when the billing map is built.
+    if (billing && Object.keys(billing.invoices).length > 0) continue;
+
+    var estimatedUnbilled = Math.max(0, item.productionValue);
     // Values below one rupee are rounding residue, not actionable unbilled work.
     if (estimatedUnbilled < 1) continue;
 
@@ -1815,7 +1812,13 @@ function _buildMasterUnbilledReport(options) {
   }
 
   rows.sort(function (a, b) {
-    if (a.status !== b.status) return a.status === "ready" ? -1 : 1;
+    // Oldest final loom run-out first. Running production without any run-out
+    // date stays at the end; customer/design makes equal dates deterministic.
+    var aDate = String(a.latestRunout || "");
+    var bDate = String(b.latestRunout || "");
+    if (aDate && !bDate) return -1;
+    if (!aDate && bDate) return 1;
+    if (aDate !== bDate) return aDate < bDate ? -1 : 1;
     var aName = a.customerDesign.toLowerCase();
     var bName = b.customerDesign.toLowerCase();
     return aName < bName ? -1 : aName > bName ? 1 : 0;
