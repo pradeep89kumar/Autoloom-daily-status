@@ -60,7 +60,7 @@ var MASTER_RECEIVABLES_MAX_PAGE_SIZE = 250;
 var MASTER_PRODUCTION_CACHE_VERSION = "master-production-v1";
 var MASTER_PRODUCTION_CACHE_TTL_SECONDS = 120;
 var MASTER_PRODUCTION_MAX_GRID_ROWS = 50000;
-var MASTER_UNBILLED_CACHE_VERSION = "master-unbilled-v3";
+var MASTER_UNBILLED_CACHE_VERSION = "master-unbilled-v4";
 var MASTER_UNBILLED_CACHE_TTL_SECONDS = 120;
 var MASTER_UNBILLED_GST_RATE = 0.05;
 var MASTER_RECEIVABLES_CACHE_LOCK_WAIT_MS = 24000;
@@ -1576,16 +1576,69 @@ function _masterUnbilledNumber(value) {
   return isFinite(number) ? Math.max(0, number) : 0;
 }
 
+function _masterUnbilledCompletionDateIndex(sheet) {
+  var width = Math.min(sheet.getLastColumn(), 33); // unbilled source is bounded to A:AG
+  if (width < 1) {
+    throw _masterReceivablesFailure(
+      "MASTER_UNBILLED_SCHEMA_EMPTY",
+      "The Paagu ID header row is empty."
+    );
+  }
+  var headers = sheet.getRange(1, 1, 1, width).getDisplayValues()[0];
+  var completionHeader = _masterHeaderKey("Completion date");
+  var matches = [];
+  for (var i = 0; i < headers.length; i++) {
+    if (_masterHeaderKey(headers[i]) === completionHeader) matches.push(i);
+  }
+  if (matches.length !== 1) {
+    var matchingColumns = [];
+    for (var m = 0; m < matches.length; m++) matchingColumns.push(_masterColumnLetter(matches[m]));
+    throw _masterReceivablesFailure(
+      "MASTER_UNBILLED_COMPLETION_DATE_HEADER",
+      'The Paagu ID sheet must contain exactly one "Completion date" header.',
+      { matchingColumns: matchingColumns }
+    );
+  }
+  return matches[0];
+}
+
+function _masterUnbilledCompletionDate(value) {
+  if (value instanceof Date) return _ymd(value);
+  var text = _masterUnbilledText(value);
+  if (!text) return "";
+
+  // Some monthly workbooks preserve the displayed date as text. Parse the
+  // sheet's DD/MM/YYYY form explicitly instead of relying on JavaScript's
+  // locale-dependent Date parser.
+  var match = text.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);
+  if (match) {
+    var day = Number(match[1]);
+    var month = Number(match[2]);
+    var year = Number(match[3]);
+    var parsed = new Date(year, month - 1, day);
+    if (
+      parsed.getFullYear() === year &&
+      parsed.getMonth() === month - 1 &&
+      parsed.getDate() === day
+    ) {
+      return _ymd(parsed);
+    }
+    return "";
+  }
+  return _ymd(_toDate(value));
+}
+
 // Unbilled uses the Paagu ID sheet's fixed operational source contract. It is
 // intentionally independent from the existing receivables schema so these
-// additional columns cannot alter Party/Invoice views:
-// B Paagu ID · C Customer/design · E Completion date · K Loom allocated
-// T Total value · Z OK mtr · AB Invoice number · AG Payment status.
-function _masterUnbilledNormalizePaaguRow(row, sheetRow, billedPaagus) {
+// additional columns cannot alter Party/Invoice views. Completion date is
+// resolved by its exact header because its monthly-sheet position can move:
+// B Paagu ID · C Customer/design · K Loom allocated · T Total value · Z OK mtr
+// AB Invoice number · AG Payment status.
+function _masterUnbilledNormalizePaaguRow(row, sheetRow, billedPaagus, completionDateIndex) {
   var fields = {
     paaguId: row[1],
     customerDesign: row[2],
-    completionDate: row[4],
+    completionDate: row[completionDateIndex],
     loom: row[10],
     totalValue: row[19],
     okMeters: row[25],
@@ -1626,9 +1679,7 @@ function _masterUnbilledNormalizePaaguRow(row, sheetRow, billedPaagus) {
   // or otherwise outside this report.
   if (paymentStatus && paymentStatus !== "unbilled") return null;
 
-  var completionDate = fields.completionDate
-    ? _ymd(_toDate(fields.completionDate))
-    : "";
+  var completionDate = _masterUnbilledCompletionDate(fields.completionDate);
   return {
     paaguId: paaguId,
     customerDesign: customerDesign,
@@ -1643,6 +1694,7 @@ function _masterUnbilledNormalizePaaguRow(row, sheetRow, billedPaagus) {
 function _readMasterUnbilledPaaguRows() {
   var context = _openMasterReceivablesContext();
   var sh = context.sheet;
+  var completionDateIndex = _masterUnbilledCompletionDateIndex(sh);
   var rawLastRow = sh.getLastRow();
   if (rawLastRow > MASTER_RECEIVABLES_MAX_GRID_ROWS) {
     throw _masterReceivablesFailure(
@@ -1685,7 +1737,12 @@ function _readMasterUnbilledPaaguRows() {
   }
   var out = [];
   for (var i = 0; i < values.length; i++) {
-    var normalized = _masterUnbilledNormalizePaaguRow(values[i], i + 2, billedPaagus);
+    var normalized = _masterUnbilledNormalizePaaguRow(
+      values[i],
+      i + 2,
+      billedPaagus,
+      completionDateIndex
+    );
     if (normalized) out.push(normalized);
   }
   return out;
