@@ -8,7 +8,7 @@ import {
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { SheetDataStatus } from "../../components/SheetDataStatus";
 import { useSheetResource } from "../../hooks/useSheetResource";
 import {
@@ -22,6 +22,10 @@ import {
   type SheetReadResult,
 } from "../../lib/sheetSync";
 import { fmtRupees } from "../../lib/partnerCopy";
+import {
+  parseUnbilledReportScope,
+  type UnbilledReportScope as UnbilledFilter,
+} from "../../lib/unbilledReport";
 import {
   advanceAmount,
   effectivePending,
@@ -43,7 +47,11 @@ type ReceivablesView = "party" | "invoice" | "unbilled";
 type InvoiceMode = "outstanding" | "paid";
 type InvoiceFilter = "pending" | "overdue" | "partial";
 type InvoiceSortDirection = "desc" | "asc";
-type UnbilledFilter = "all" | "running" | "ready";
+
+interface ReceivablesRouteState {
+  receivablesView?: ReceivablesView;
+  unbilledFilter?: UnbilledFilter;
+}
 
 async function loadReceivablesResult(
   { fresh }: { fresh: boolean },
@@ -387,8 +395,13 @@ function UnbilledTable({ rows }: { rows: MasterUnbilledRow[] }) {
 }
 
 /** Mounted only after the Unbilled tab is selected, so existing views do not wait for this request. */
-function UnbilledReceivablesView() {
-  const [filter, setFilter] = useState<UnbilledFilter>("ready");
+function UnbilledReceivablesView({
+  initialFilter = "ready",
+}: {
+  initialFilter?: UnbilledFilter;
+}) {
+  const navigate = useNavigate();
+  const [filter, setFilter] = useState<UnbilledFilter>(initialFilter);
   const resource = useSheetResource<MasterUnbilledData>({
     resourceKey: "partner:master-unbilled",
     load: loadMasterUnbilledResult,
@@ -491,6 +504,19 @@ function UnbilledReceivablesView() {
             )}
           </div>
 
+          <div className="mb-3 flex justify-end">
+            <button
+              type="button"
+              onClick={() =>
+                navigate(`/partner/receivables/unbilled-report?scope=${filter}`)
+              }
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[13px] font-semibold text-blue-700 transition-colors hover:bg-blue-100"
+            >
+              <FilePdf className="h-4 w-4" weight="bold" />
+              Generate report
+            </button>
+          </div>
+
           <div
             role="group"
             aria-label="Unbilled production filter"
@@ -555,10 +581,16 @@ function UnbilledReceivablesView() {
 
 export function PartnerReceivables() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const routeState = location.state as ReceivablesRouteState | null;
+  const initialView = routeState?.receivablesView === "unbilled" ? "unbilled" : "party";
+  const initialUnbilledFilter = parseUnbilledReportScope(
+    routeState?.unbilledFilter ?? null,
+  );
   const [expanded, setExpanded] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<FilterKey>("pending");
-  const [view, setView] = useState<ReceivablesView>("party");
+  const [view, setView] = useState<ReceivablesView>(initialView);
   const [invoiceMode, setInvoiceMode] = useState<InvoiceMode>("outstanding");
   const [invoiceFilter, setInvoiceFilter] = useState<InvoiceFilter>("pending");
   const [invoiceSort, setInvoiceSort] = useState<InvoiceSortDirection>("desc");
@@ -694,7 +726,7 @@ export function PartnerReceivables() {
       )}
 
       {view === "unbilled" ? (
-        <UnbilledReceivablesView />
+        <UnbilledReceivablesView initialFilter={initialUnbilledFilter} />
       ) : loading || rows !== null ? (view === "party" ? (
         <>
 
